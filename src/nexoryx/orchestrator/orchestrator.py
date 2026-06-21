@@ -14,7 +14,7 @@ from ..agents.security import security_veto
 from ..brain import classify
 from ..memory import MemoryStore
 from ..platform import Hardware, Profile
-from ..router import Router
+from ..router import Router, ChatRequest
 from ..tools import ToolContext
 from ..tools.registry import run_tool
 from .bus import Bus
@@ -95,17 +95,27 @@ class Orchestrator:
         import json as _json
         from ..tools.registry import list_tools, run_tool
 
+        import os as _os
         tools = list_tools()
         tool_doc = "\n".join(f"- {t.name}: {t.description}" for t in tools)
+        home = _os.path.expanduser("~")
         system = (
-            "Du bist ein Nexoryx-Agent mit Werkzeugen. Arbeite in Schritten.\n"
+            "Du bist Nexoryx, ein KI-Assistent der den PC des Nutzers steuern kann.\n"
+            f"Home-Verzeichnis des Nutzers: {home}\n"
+            f"Aktuelles Verzeichnis: {ctx.project_root or _os.getcwd()}\n\n"
+            "Du hast Zugriff auf Werkzeuge. Gehe Schritt für Schritt vor.\n"
             "Wenn du ein Werkzeug brauchst, antworte mit GENAU EINER Zeile:\n"
-            '  ACTION: <tool> <json-args>\n'
+            "  ACTION: <tool> <json-args>\n\n"
             "Beispiele:\n"
-            '  ACTION: web_search {"query": "Wetter Berlin"}\n'
-            '  ACTION: terminal {"command": "ls -la"}\n'
+            '  ACTION: terminal {"command": "mkdir ~/Desktop/MeinOrdner"}\n'
+            '  ACTION: terminal {"command": "ls ~/Desktop"}\n'
+            '  ACTION: terminal {"command": "xdg-open ~/Desktop/MeinOrdner"}\n'
+            '  ACTION: fs_write {"path": "~/Desktop/notiz.txt", "content": "Hallo!"}\n'
+            '  ACTION: terminal {"command": "xdg-open https://example.com"}\n'
+            '  ACTION: web_search {"query": "Wetter Berlin heute"}\n\n'
+            "Nutze IMMER absolute Pfade mit ~ für das Home-Verzeichnis.\n"
             "Wenn du fertig bist, antworte mit:\n"
-            "  FINAL: <deine Antwort>\n\n"
+            "  FINAL: <kurze Bestätigung was du getan hast>\n\n"
             f"Verfügbare Werkzeuge:\n{tool_doc}"
         )
         steps: list[str] = []

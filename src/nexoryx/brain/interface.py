@@ -13,6 +13,21 @@ from dataclasses import dataclass
 
 # Schlüsselwörter pro Task-Typ (DE + EN). Reihenfolge = Priorität.
 _KEYWORDS = {
+    "action": (
+        # Deutsch
+        "erstell", "lösch", "öffne", "öffn", "starte", "start", "zeige mir",
+        "zeig mir", "liste", "kopiere", "verschiebe", "umbenenn", "schreibe",
+        "schreib", "lade herunter", "download", "installier", "führe aus",
+        "mach einen", "mach ein", "erstelle mir", "lege an", "lege einen",
+        "lege eine", "ordner erstell", "ordner anlegen", "datei erstell",
+        "datei schreib", "öffne die", "starte das", "starte die",
+        "klicke", "drücke", "wechsle", "gehe zu", "navigiere",
+        # Englisch
+        "create", "delete", "remove", "open", "launch", "show me", "list",
+        "copy", "move", "rename", "write to", "download", "install",
+        "run", "execute", "make a", "make an", "create a", "create an",
+        "make folder", "make file", "mkdir", "touch", "click", "press",
+    ),
     "coding": (
         "code", "function", "bug", "fehler", "kompil", "compile", "python",
         "javascript", "refactor", "klasse", "class", "api", "regex", "stack trace",

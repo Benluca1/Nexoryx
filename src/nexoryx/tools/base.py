@@ -11,6 +11,7 @@ class ToolContext:
     project_root: str = ""      # FS-Jail-Wurzel
     actor: str = "cli"          # cli | telegram:<id>
     auto_approve: bool = False   # Approve/Deny-Gate überspringen (z. B. Admin)
+    sandbox: bool = True         # False = direkter subprocess (kein bwrap/firejail)
 
 
 @dataclass

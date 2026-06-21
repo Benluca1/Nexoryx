@@ -20,7 +20,7 @@ class TerminalTool(Tool):
             return ToolResult(False, "", "Kein Kommando angegeben")
         cwd = ctx.project_root or os.getcwd()
         timeout = int(args.get("timeout", 30))
-        code, out, err, kind = run_sandboxed(cmd, cwd, timeout)
+        code, out, err, kind = run_sandboxed(cmd, cwd, timeout, sandbox=ctx.sandbox)
         ok = code == 0
         return ToolResult(
             ok=ok,

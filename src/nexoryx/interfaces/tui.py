@@ -58,17 +58,21 @@ Einfach eine Frage schreiben — Nexoryx antwortet direkt.
 # ── Öffentlicher Einstieg ─────────────────────────────────────────────────────
 
 def run() -> int:
+    import os
     from ..platform import detect, choose_profile
     from ..platform import config as cfg_mod
     from ..brain import classify
     from ..router import ChatRequest, Router, ProviderError
     from ..memory import MemoryStore
+    from ..orchestrator import Orchestrator
+    from ..tools import ToolContext
 
     hw = detect()
     profile = choose_profile(hw)
     router = Router(hw, profile)
     mem = MemoryStore()
     cfg = cfg_mod.load()
+    orch = Orchestrator(hw, profile, memory=mem)
 
     if not HAS_RICH:
         return _run_plain(router, mem, cfg, profile)
@@ -185,6 +189,12 @@ def run() -> int:
             history.extend([f"User: {user}", f"Nexoryx: {brain.canned[:300]}"])
             continue
 
+        # ── Agentic-Modus für PC-Aktionen ──────────────────────────────────────
+        if brain.task_type == "action":
+            _run_agentic(console, orch, user, history, mem, cfg, private)
+            continue
+
+        # ── Normaler Chat-Modus ─────────────────────────────────────────────────
         ctx_items = mem.recall(user, limit=3)
         ctx_text = "\n".join(f"- {m.text}" for m in ctx_items)
         convo = "\n".join(history[-6:])
@@ -238,6 +248,79 @@ def run() -> int:
         mem.remember(f"Chat: {user} → {answer[:200]}", scope="long")
 
     return 0
+
+
+# ── Agentic-Modus (PC-Kontrolle) ─────────────────────────────────────────────
+
+def _run_agentic(console: "Console", orch, task: str, history: list,
+                 mem, cfg, private: bool) -> None:
+    import os
+    from ..tools import ToolContext
+
+    home = os.path.expanduser("~")
+    ctx = ToolContext(
+        role=cfg.role,
+        project_root=home,
+        actor="tui",
+        auto_approve=False,
+        sandbox=False,   # direkte Ausführung — Sicherheit kommt vom confirm-Gate
+    )
+
+    step_log: list[str] = []
+
+    def confirm_cb(tool, reason: str) -> bool:
+        """Zeigt ein Bestätigungs-Panel und wartet auf j/n."""
+        cmd_info = reason
+        console.print()
+        console.print(Panel(
+            Text(f"  {cmd_info}", style="white"),
+            title=f"[yellow]⚡ Aktion erforderlich[/yellow]  [dim]{tool.name}[/dim]",
+            border_style="yellow",
+            box=box.HEAVY_HEAD,
+            padding=(0, 1),
+        ))
+        try:
+            ans = console.input(
+                f"  [yellow]Ausführen?[/yellow]  [[bold]J[/bold]]a / [dim]N[/dim]ein:  "
+            ).strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            return False
+        approved = ans in ("j", "ja", "y", "yes", "")
+        if approved:
+            console.print(f"  [green]✓[/green] [dim]Bestätigt[/dim]")
+        else:
+            console.print(f"  [dim]✗ Übersprungen[/dim]")
+        return approved
+
+    def on_step(name: str, args: dict) -> None:
+        cmd = args.get("command") or args.get("query") or args.get("path") or str(args)
+        step_log.append(f"{name}: {str(cmd)[:60]}")
+        console.print(
+            f"  [{_AMBER_DIM}]→[/{_AMBER_DIM}]  [dim]{name}[/dim]  {str(cmd)[:80]}"
+        )
+
+    console.print()
+    with console.status(
+        f"  [{_AMBER_DIM}]◆  Plant Schritte …[/{_AMBER_DIM}]",
+        spinner="arc",
+        spinner_style=_AMBER,
+    ):
+        pass  # zeigt kurz den Spinner bevor der Loop beginnt
+
+    try:
+        result = orch.agentic_run(
+            task, ctx,
+            confirm_cb=confirm_cb,
+            on_step=on_step,
+            max_steps=8,
+        )
+    except Exception as exc:
+        console.print(f"\n  [red]● Fehler:[/red] {exc}\n")
+        return
+
+    label = f"agentic · {len(result.steps)} Schritt{'e' if len(result.steps) != 1 else ''}"
+    _print_bot(console, result.answer, label=label)
+    history.extend([f"User: {task}", f"Nexoryx: {result.answer[:300]}"])
 
 
 # ── Visuelle Bausteine ────────────────────────────────────────────────────────

@@ -32,8 +32,21 @@ def _wrap(cmd: str, cwd: str) -> list[str]:
     return ["bash", "-lc", cmd]
 
 
-def run_sandboxed(cmd: str, cwd: str, timeout: int = DEFAULT_TIMEOUT) -> tuple[int, str, str, str]:
+def run_sandboxed(cmd: str, cwd: str, timeout: int = DEFAULT_TIMEOUT,
+                  sandbox: bool = True) -> tuple[int, str, str, str]:
     """Gibt (returncode, stdout, stderr, sandbox_kind) zurück."""
+    if not sandbox:
+        try:
+            proc = subprocess.run(
+                ["bash", "-lc", cmd], cwd=cwd, capture_output=True, text=True,
+                timeout=timeout, check=False,
+            )
+            return proc.returncode, proc.stdout[:MAX_OUTPUT], proc.stderr[:MAX_OUTPUT], "direct"
+        except subprocess.TimeoutExpired:
+            return 124, "", f"Timeout nach {timeout}s", "direct"
+        except OSError as exc:
+            return 1, "", str(exc), "direct"
+
     kind = ("bwrap" if shutil.which("bwrap")
             else "firejail" if shutil.which("firejail") else "subprocess")
     try:
