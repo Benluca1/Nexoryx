@@ -289,6 +289,68 @@ def cmd_chat(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_keys(args: argparse.Namespace) -> int:
+    """Einfaches Key-Management ohne Admin-Gate.
+
+    Jedes Gerät kann damit seinen GitHub-PAT (und Cloud-Keys) setzen,
+    damit Training-Uploads und API-Calls funktionieren.
+    """
+    _KEY_MAP = {
+        "github":    ("GITHUB_PAT",        "github.com/settings/tokens → Classic Token, Scope: repo"),
+        "anthropic": ("ANTHROPIC_API_KEY", "console.anthropic.com → API Keys"),
+        "openai":    ("OPENAI_API_KEY",    "platform.openai.com → API Keys"),
+        "gemini":    ("GEMINI_API_KEY",    "aistudio.google.com → API Key"),
+    }
+
+    if args.keys_action == "list":
+        _header("API-Keys & GitHub-PAT")
+        for name, (env, hint) in _KEY_MAP.items():
+            val = cfg_mod.get_key(env)
+            status = _c("gesetzt", _GREEN) if val else _c("—", _DIM)
+            _kv(name, f"{status}  [dim]{hint}[/dim]" if not val else status)
+        print()
+        _header("Training-Upload Status")
+        from .training.on_exit import PAT_FILE, _device_id
+        _kv("Gerät", _device_id())
+        _kv("PAT-Datei", str(PAT_FILE))
+        _kv("Upload aktiv", _c("ja", _GREEN) if PAT_FILE.exists() else _c("nein (kein PAT)", _YELLOW))
+        print()
+        return 0
+
+    if args.keys_action == "set":
+        import getpass
+        name = args.provider.lower()
+        if name not in _KEY_MAP:
+            print(_c(f"Unbekannt: {name}. Verfügbar: {', '.join(_KEY_MAP)}", _RED))
+            return 1
+        env, hint = _KEY_MAP[name]
+        print(f"  {_c(hint, _DIM)}")
+
+        # GitHub-PAT: direkt in ~/.nexoryx/secrets/github_pat speichern
+        if name == "github":
+            value = getpass.getpass(f"GitHub PAT (verborgen): ").strip()
+            if not value:
+                print(_c("Abgebrochen.", _YELLOW)); return 1
+            from .platform.config import CONFIG_DIR
+            pat_dir = CONFIG_DIR / "secrets"
+            pat_dir.mkdir(parents=True, exist_ok=True)
+            pat_file = pat_dir / "github_pat"
+            pat_file.write_text(value, encoding="utf-8")
+            import os as _os; _os.chmod(pat_file, 0o600)
+            print(_c(f"✓ GitHub-PAT gespeichert ({pat_file})", _GREEN))
+            print(_c("  Training-Uploads werden jetzt von diesem Gerät hochgeladen.", _DIM))
+            return 0
+
+        value = getpass.getpass(f"{env} (verborgen): ").strip()
+        if not value:
+            print(_c("Abgebrochen.", _YELLOW)); return 1
+        cfg_mod.set_secret(env, value)
+        print(_c(f"✓ {env} gespeichert.", _GREEN))
+        return 0
+
+    return 1
+
+
 def cmd_usage(_args: argparse.Namespace) -> int:
     from .platform import usage as usage_mod
     t = usage_mod.today()
@@ -470,6 +532,7 @@ def cmd_admin(args: argparse.Namespace) -> int:
             "anthropic": "ANTHROPIC_API_KEY",
             "openai": "OPENAI_API_KEY",
             "gemini": "GEMINI_API_KEY",
+            "github": "GITHUB_PAT",
         }
         if args.keys_action == "list":
             _header("API-Keys")
@@ -626,6 +689,14 @@ def build_parser() -> argparse.ArgumentParser:
     dmn.set_defaults(func=cmd_daemon)
 
     sub.add_parser("telegram", help="Telegram-Bot starten").set_defaults(func=cmd_telegram)
+
+    # keys — für alle Geräte, kein Admin-Gate
+    keys_top = sub.add_parser("keys", help="API-Keys + GitHub-PAT verwalten (alle Geräte)")
+    ksub_top = keys_top.add_subparsers(dest="keys_action", required=True)
+    ksub_top.add_parser("list", help="Keys-Status anzeigen")
+    kset_top = ksub_top.add_parser("set", help="Key setzen")
+    kset_top.add_argument("provider", help="github|anthropic|openai|gemini")
+    keys_top.set_defaults(func=cmd_keys)
 
     admin = sub.add_parser("admin", help="Admin-Funktionen (nur Owner-Instanz)")
     asub = admin.add_subparsers(dest="admin_action", required=True)
