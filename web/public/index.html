@@ -15,7 +15,8 @@
       <nav>
         <a href="#install">Installieren</a>
         <a href="#hardware">Hardware</a>
-        <a href="#modelle">Modelle</a>
+        <a href="#modelle">Modelle &amp; Ollama</a>
+        <a href="#apikeys">API-Keys</a>
         <a href="install.html">Anleitung</a>
       </nav>
     </header>
@@ -25,16 +26,39 @@
       <h1>Dein eigener <span class="accent">KI-Assistent</span>,<br />auf jedem Gerät.</h1>
       <p class="lead">
         Nexoryx läuft sogar auf alten Laptops, erkennt deine Hardware automatisch und
-        wählt selbst das beste Modell — lokal oder Cloud. Steuerbar per Terminal und Telegram.
+        wählt selbst das beste Modell — lokal (Ollama) oder Cloud (Anthropic, OpenAI, Gemini).
+        Steuerbar per Terminal und Telegram.
       </p>
 
-      <div id="install" class="cmd">
-        <span class="prompt">$</span>
-        <code id="install-cmd">curl -fsSL http://192.168.13.100:3007/install.sh | bash</code>
-        <button class="copybtn" data-copy-target="#install-cmd">kopieren</button>
+      <div id="install" class="install-tabs">
+        <div class="os-tabs">
+          <button class="os-tab active" data-tab="linux">Linux / macOS</button>
+          <button class="os-tab" data-tab="windows">Windows</button>
+        </div>
+        <div class="tab-panel active" id="tab-linux">
+          <div class="cmd">
+            <span class="prompt">$</span>
+            <code id="install-cmd-linux">curl -fsSL http://192.168.13.100:3007/install.sh | bash</code>
+            <button class="copybtn" data-copy-target="#install-cmd-linux">kopieren</button>
+          </div>
+          <p class="os-hint">Terminal öffnen → Befehl einfügen → Enter. Fertig.</p>
+        </div>
+        <div class="tab-panel" id="tab-windows">
+          <div class="cmd" style="margin-bottom:10px">
+            <span class="prompt">PS&gt;</span>
+            <code id="install-cmd-win">irm http://192.168.13.100:3007/install.ps1 | iex</code>
+            <button class="copybtn" data-copy-target="#install-cmd-win">kopieren</button>
+          </div>
+          <p class="os-hint">PowerShell <b>als Administrator</b> öffnen → Befehl einfügen → Enter.</p>
+          <div class="callout" style="margin-top:10px;font-size:13px">
+            Alternativ via <b>WSL (Ubuntu)</b>: <code class="inline">curl -fsSL http://192.168.13.100:3007/install.sh | bash</code>
+            — empfohlen für volle Kompatibilität.
+          </div>
+        </div>
       </div>
-      <p class="os-hint" id="os-hint">
-        Erkanntes System: <b data-os>…</b> · von <b>diesem Server</b> installiert = <b>Admin-Modus</b> 🔑
+
+      <p class="os-hint" id="os-hint" style="margin-top:10px">
+        Erkanntes System: <b data-os>…</b> · von <b>diesem Server</b> installiert = <b>Admin-Modus</b>
       </p>
     </section>
 
@@ -44,61 +68,191 @@
       <div class="grid">
         <div class="card lite">
           <h3>Ultra-Lite <span class="tag">CPU-only</span></h3>
-          <p>Alte Laptops, ab ~4 GB RAM. Kleines lokales Modell, sehr sparsam.</p>
+          <p>Alte Laptops, ab ~4 GB RAM. Kleines lokales Modell (Ollama Tiny), sehr sparsam. Agenten laufen sequenziell.</p>
         </div>
         <div class="card balanced">
           <h3>Balanced <span class="tag">8 GB+</span></h3>
-          <p>Normale Rechner. Kleine + mittlere Modelle, optional Cloud.</p>
+          <p>Normale Rechner. Mittlere Ollama-Modelle (7B), optional Cloud-Fallback. Begrenzte Parallelität.</p>
         </div>
         <div class="card pro">
           <h3>Pro <span class="tag">GPU</span></h3>
-          <p>Starke GPU (≥24 GB VRAM) oder ≥48 GB RAM. Große Modelle, Multi-Agent.</p>
+          <p>Starke GPU (≥24 GB VRAM) oder ≥48 GB RAM. Große Modelle (32–70B), Multi-Agent, volle Parallelität.</p>
         </div>
       </div>
     </section>
 
     <section id="modelle">
-      <h2><span class="num">02</span>Die Modelle</h2>
-      <p class="sub">Eigene, gestaffelte Modell-Familie — automatisch passend installiert.</p>
+      <h2><span class="num">02</span>Modelle &amp; Ollama</h2>
+      <p class="sub">Nexoryx nutzt <b>Ollama</b> als lokale Inferenz-Engine und eigene Modelle als Spezialstufen.
+        Alles wird beim Start automatisch erkannt — kein manuelles Konfigurieren nötig.</p>
+
+      <h3 class="sub-head">Nexoryx-eigene Modelle</h3>
       <table>
-        <thead><tr><th>Modell</th><th>Rolle</th><th>Ab Stufe</th></tr></thead>
+        <thead><tr><th>Modell</th><th>Rolle</th><th>Ab Stufe</th><th>VRAM</th></tr></thead>
         <tbody>
-          <tr><td class="mono">nexoryx-tiny</td><td>„Control Brain": Intent &amp; Routing</td><td>immer</td></tr>
-          <tr><td class="mono">nexoryx-mini</td><td>Lokales Allzweck-Modell</td><td>Balanced</td></tr>
-          <tr><td class="mono">nexoryx-large</td><td>Bestes lokales Modell (Coding/Reasoning)</td><td>Pro</td></tr>
+          <tr>
+            <td class="mono">nexoryx-tiny</td>
+            <td>„Control Brain": Intent-Klassifikation &amp; Routing-Entscheidung</td>
+            <td>immer</td>
+            <td>&lt; 1 GB</td>
+          </tr>
+          <tr>
+            <td class="mono">nexoryx-mini</td>
+            <td>Lokales Allzweck-Modell (Zusammenfassungen, einfache Tasks)</td>
+            <td>Balanced</td>
+            <td>~5 GB</td>
+          </tr>
+          <tr>
+            <td class="mono">nexoryx-large</td>
+            <td>Bestes lokales Modell (Coding, Reasoning, Analyse)</td>
+            <td>Pro</td>
+            <td>~20 GB</td>
+          </tr>
         </tbody>
       </table>
-      <p class="sub" style="margin-top:14px">
-        Für absolute Spitzenqualität routet Nexoryx automatisch in die Cloud
-        (Anthropic, OpenAI, Google) — du gibst die Keys bei der Installation an.
+
+      <h3 class="sub-head" style="margin-top:28px">Ollama — empfohlene Community-Modelle</h3>
+      <p class="sub">
+        Wenn Ollama installiert ist und auf Port <code class="inline">11434</code> läuft, erkennt Nexoryx es automatisch.
+        Modelle werden per <code class="inline">ollama pull &lt;name&gt;</code> heruntergeladen.
       </p>
+      <table>
+        <thead><tr><th>Modell</th><th>Größe</th><th>Stufe</th><th>Stärke</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">qwen2.5:0.5b</td><td>~400 MB</td><td>Ultra-Lite</td><td>Routing, kurze Antworten</td></tr>
+          <tr><td class="mono">tinyllama</td><td>~600 MB</td><td>Ultra-Lite</td><td>Einfache Q&amp;A, sehr schnell</td></tr>
+          <tr><td class="mono">llama3.2:3b</td><td>~2 GB</td><td>Balanced</td><td>Allgemein, schnell</td></tr>
+          <tr><td class="mono">qwen2.5:7b</td><td>~5 GB</td><td>Balanced</td><td>Coding, Reasoning</td></tr>
+          <tr><td class="mono">mistral:7b</td><td>~5 GB</td><td>Balanced</td><td>Allgemein, Deutsch gut</td></tr>
+          <tr><td class="mono">qwen2.5:32b</td><td>~20 GB</td><td>Pro</td><td>Starkes Coding &amp; Reasoning</td></tr>
+          <tr><td class="mono">llama3.3:70b</td><td>~40 GB</td><td>Pro</td><td>Frontier-nah, Allzweck</td></tr>
+          <tr><td class="mono">deepseek-r1:32b</td><td>~20 GB</td><td>Pro</td><td>Chain-of-Thought, Mathe</td></tr>
+        </tbody>
+      </table>
+
+      <div class="callout" style="margin-top:18px">
+        <b>Ollama installieren (Linux/macOS):</b>
+        <div class="cmd" style="margin-top:10px">
+          <span class="prompt">$</span>
+          <code id="ollama-install">curl -fsSL https://ollama.com/install.sh | sh</code>
+          <button class="copybtn" data-copy-target="#ollama-install">kopieren</button>
+        </div>
+        <p style="margin:10px 0 4px">Dann ein Modell holen, z.B.:</p>
+        <div class="cmd">
+          <span class="prompt">$</span>
+          <code id="ollama-pull">ollama pull qwen2.5:7b</code>
+          <button class="copybtn" data-copy-target="#ollama-pull">kopieren</button>
+        </div>
+        <p style="margin:10px 0 0;color:var(--muted);font-size:13px">
+          Nexoryx erkennt Ollama beim Start automatisch. Kein weiterer Setup nötig.
+        </p>
+      </div>
+    </section>
+
+    <section id="apikeys">
+      <h2><span class="num">03</span>API-Keys &amp; Cloud-Provider</h2>
+      <p class="sub">
+        Alle Cloud-Keys sind <b>optional</b> — Nexoryx läuft vollständig offline ohne einen einzigen Key.
+        Mit Keys routet der Model-Router automatisch in die Cloud, wenn lokale Modelle nicht ausreichen.
+      </p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Provider</th>
+            <th>Key-Name</th>
+            <th>Woher</th>
+            <th>Wofür</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>Anthropic</b> <span class="badge-teal">empfohlen</span></td>
+            <td class="mono">ANTHROPIC_API_KEY</td>
+            <td><a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" style="color:var(--teal)">console.anthropic.com</a></td>
+            <td>Claude — beste Qualität, Coding, Reasoning</td>
+          </tr>
+          <tr>
+            <td><b>OpenAI</b></td>
+            <td class="mono">OPENAI_API_KEY</td>
+            <td><a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener" style="color:var(--teal)">platform.openai.com</a></td>
+            <td>GPT-4o — Fallback, Vision, Embeddings</td>
+          </tr>
+          <tr>
+            <td><b>Google Gemini</b></td>
+            <td class="mono">GOOGLE_API_KEY</td>
+            <td><a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="color:var(--teal)">aistudio.google.com</a></td>
+            <td>Gemini — Fallback, langer Kontext, Vision</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="key-how">
+        <div class="key-step">
+          <div class="key-num">A</div>
+          <div>
+            <b>Während der Installation</b><br />
+            <span class="muted">bootstrap.py fragt interaktiv nach jedem Key. Einfach eingeben oder leer lassen zum Überspringen.</span>
+          </div>
+        </div>
+        <div class="key-step">
+          <div class="key-num">B</div>
+          <div>
+            <b>Nachträglich per CLI</b><br />
+            <div class="cmd" style="margin-top:8px">
+              <span class="prompt">$</span>
+              <code id="key-set-cmd">nexoryx admin key set anthropic sk-ant-…</code>
+              <button class="copybtn" data-copy-target="#key-set-cmd">kopieren</button>
+            </div>
+          </div>
+        </div>
+        <div class="key-step">
+          <div class="key-num">C</div>
+          <div>
+            <b>Manuell (Umgebungsvariable)</b><br />
+            <div class="cmd" style="margin-top:8px">
+              <span class="prompt">$</span>
+              <code id="key-env-cmd">export ANTHROPIC_API_KEY="sk-ant-…"</code>
+              <button class="copybtn" data-copy-target="#key-env-cmd">kopieren</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout" style="margin-top:18px">
+        <b>Sicherheit:</b> Keys werden ausschließlich in <code class="inline">~/.nexoryx/secrets</code>
+        (chmod 600) gespeichert — nie im Repo, nie in Logs. Das öffentliche GitHub-Repo enthält zu keiner Zeit Credentials.
+        Budget-Limits pro Provider sind in <code class="inline">~/.nexoryx/config.yaml</code> konfigurierbar,
+        um unerwartete Cloud-Kosten zu vermeiden.
+      </div>
     </section>
 
     <section>
-      <h2><span class="num">03</span>In 3 Schritten startklar</h2>
+      <h2><span class="num">04</span>In 3 Schritten startklar</h2>
       <ol class="steps">
-        <li><b>Befehl kopieren</b> (oben) und im Terminal einfügen.</li>
-        <li><b>Fragen beantworten</b> — Nexoryx prüft die Hardware und fragt optional nach API-Keys &amp; Telegram.</li>
+        <li><b>Befehl kopieren</b> (oben, je nach OS) und im Terminal / PowerShell als Admin einfügen.</li>
+        <li><b>Fragen beantworten</b> — Nexoryx prüft die Hardware, installiert Ollama-Modelle und fragt optional nach API-Keys &amp; Telegram.</li>
         <li><b>Loslegen:</b> <code class="inline">nexoryx ask "Hallo"</code> oder über den Telegram-Bot.</li>
       </ol>
       <p class="sub" style="margin-top:6px">
-        Ausführliche Schritt-für-Schritt-Anleitung pro Betriebssystem →
+        Ausführliche Schritt-für-Schritt-Anleitung pro Betriebssystem, inkl. API-Keys &amp; Ollama →
         <a href="install.html" style="color:var(--teal)">install.html</a>
       </p>
     </section>
 
     <section>
-      <h2><span class="num">04</span>Wichtige Befehle</h2>
+      <h2><span class="num">05</span>Wichtige Befehle</h2>
       <table>
         <tbody>
-          <tr><td class="mono">nexoryx doctor</td><td>Hardware + Profil prüfen</td></tr>
+          <tr><td class="mono">nexoryx doctor</td><td>Hardware + Profil + Modelle prüfen</td></tr>
           <tr><td class="mono">nexoryx ask "…"</td><td>Eine Frage stellen (Router → lokal/Cloud)</td></tr>
           <tr><td class="mono">nexoryx run "…"</td><td>Aufgabe über Planner + Agenten</td></tr>
           <tr><td class="mono">nexoryx exec "…"</td><td>Shell in Sandbox (Security + Audit)</td></tr>
+          <tr><td class="mono">nexoryx models pull tiny|mini|large</td><td>Hardware-geprüfter Modell-Download</td></tr>
           <tr><td class="mono">nexoryx memory …</td><td>Speicher list/search/forget/remember</td></tr>
+          <tr><td class="mono">nexoryx admin key set &lt;provider&gt; &lt;key&gt;</td><td>API-Key setzen oder aktualisieren</td></tr>
           <tr><td class="mono">nexoryx daemon</td><td>HTTP-API (nexoryxd) starten</td></tr>
           <tr><td class="mono">nexoryx telegram</td><td>Telegram-Bot starten</td></tr>
-          <tr><td class="mono">nexoryx admin …</td><td>Keys/Rollen/Telegram (nur Server-Install)</td></tr>
           <tr><td class="mono">nexoryx panic</td><td>Not-Aus: alles stoppen</td></tr>
         </tbody>
       </table>

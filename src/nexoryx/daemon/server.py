@@ -78,6 +78,14 @@ def _build_handler():
 
 
 def serve(host: str = "127.0.0.1", port: int = 3008) -> None:
+    # Hintergrund-Malware-Scan beim Daemon-Start
+    try:
+        from ..platform.scanner import check_pending, start_background_scan
+        check_pending()
+        start_background_scan()
+    except Exception:
+        pass
+
     handler = _build_handler()
     httpd = ThreadingHTTPServer((host, port), handler)
     print(f"nexoryxd läuft auf http://{host}:{port}  (Ctrl-C zum Beenden)")

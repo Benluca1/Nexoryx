@@ -14,7 +14,9 @@
       <nav>
         <a href="index.html">Start</a>
         <a href="#voraussetzungen">Voraussetzungen</a>
-        <a href="#schritte">Schritte</a>
+        <a href="#schritte">Installation</a>
+        <a href="#api-keys">API-Keys</a>
+        <a href="#ollama">Ollama</a>
         <a href="#hilfe">Hilfe</a>
       </nav>
     </header>
@@ -22,83 +24,448 @@
     <section class="hero" style="border:0">
       <span class="eyebrow">Schritt für Schritt</span>
       <h1>Nexoryx <span class="accent">installieren</span></h1>
-      <p class="lead">Ein Befehl genügt. Erkanntes System: <b data-os style="color:var(--teal)">…</b></p>
-      <div class="cmd">
-        <span class="prompt">$</span>
-        <code id="install-cmd">curl -fsSL http://192.168.13.100:3007/install.sh | bash</code>
-        <button class="copybtn" data-copy-target="#install-cmd">kopieren</button>
-      </div>
-      <p class="os-hint" id="os-hint" style="visibility:hidden">x<b data-os></b></p>
+      <p class="lead">
+        Ein Befehl — der Installer übernimmt alles: Python, Ollama, Modelle, API-Keys, Telegram.
+        Erkanntes System: <b data-os style="color:var(--teal)">…</b>
+      </p>
     </section>
 
     <section id="voraussetzungen">
       <h2><span class="num">01</span>Voraussetzungen</h2>
-      <ul>
-        <li><b>Python 3.11+</b> — prüfen mit <code class="inline">python3 --version</code></li>
-        <li><b>curl</b> und (empfohlen) <b>git</b></li>
-        <li>Internet für den Erst-Download der Modelle</li>
-      </ul>
+      <p class="sub">
+        <b>Du brauchst nichts vorab zu installieren.</b> Der Installer erledigt alles automatisch:
+        Python 3.11+, Ollama, alle Abhängigkeiten. Einzige wirkliche Voraussetzung:
+      </p>
+      <table>
+        <tbody>
+          <tr>
+            <td><b>Linux / macOS</b></td>
+            <td><code class="inline">curl</code> muss vorhanden sein (bei macOS &amp; fast allen Linux-Distros vorinstalliert)</td>
+          </tr>
+          <tr>
+            <td><b>Windows</b></td>
+            <td>PowerShell 5.1+ (ab Windows 10 vorinstalliert) · oder WSL mit Ubuntu</td>
+          </tr>
+          <tr>
+            <td><b>Internet</b></td>
+            <td>Für den Erst-Download von Python, Ollama und Modellen (einmalig)</td>
+          </tr>
+          <tr>
+            <td><b>RAM</b></td>
+            <td>Mindestens 4 GB (läuft dann im Ultra-Lite-Modus mit Tiny-Modell)</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="callout" style="margin-top:14px">
+        <b>Was der Installer automatisch einrichtet:</b> Python 3.11 (falls nicht vorhanden),
+        <code class="inline">pip</code> + <code class="inline">venv</code>, Nexoryx-Paket,
+        Ollama (lokale Inferenz), passendes Startmodell je nach Hardware,
+        <code class="inline">~/.nexoryx/</code>-Konfigurationsverzeichnis,
+        optionale Telegram-Integration. Auf Linux auch systemd-Service für automatischen Start.
+      </div>
     </section>
 
     <section id="schritte">
-      <h2><span class="num">02</span>Pro Betriebssystem</h2>
+      <h2><span class="num">02</span>Installation — pro Betriebssystem</h2>
 
+      <!-- Linux -->
       <div class="card" data-os-tab="Linux" style="margin-bottom:14px">
-        <h3>🐧 Linux</h3>
-        <p>Terminal öffnen, Befehl einfügen, ausführen. Fertig.</p>
-        <div class="cmd" style="margin-top:12px">
+        <h3>Linux</h3>
+        <p style="color:var(--muted);font-size:14px;margin:0 0 12px">
+          Terminal öffnen, Befehl einfügen, Enter drücken. Der Installer fragt interaktiv nach
+          API-Keys und Telegram — alles kann übersprungen werden.
+        </p>
+        <div class="cmd">
           <span class="prompt">$</span>
           <code id="cmd-linux">curl -fsSL http://192.168.13.100:3007/install.sh | bash</code>
           <button class="copybtn" data-copy-target="#cmd-linux">kopieren</button>
         </div>
+        <p class="step-detail">
+          Installierts: Python 3.11 via <code class="inline">apt</code>/<code class="inline">dnf</code>/<code class="inline">pacman</code>
+          (je nach Distro), Ollama, Nexoryx-Paket, systemd-Service.
+        </p>
       </div>
 
+      <!-- macOS -->
       <div class="card" data-os-tab="macOS" style="margin-bottom:14px">
-        <h3>🍎 macOS</h3>
-        <p>Falls Python fehlt: <code class="inline">brew install python@3.12</code>, dann:</p>
-        <div class="cmd" style="margin-top:12px">
+        <h3>macOS</h3>
+        <p style="color:var(--muted);font-size:14px;margin:0 0 12px">
+          Terminal öffnen (cmd+Space → „Terminal"), Befehl einfügen. Der Installer installiert Python
+          via Homebrew falls nötig — Homebrew selbst wird ebenfalls automatisch installiert.
+        </p>
+        <div class="cmd">
           <span class="prompt">$</span>
           <code id="cmd-mac">curl -fsSL http://192.168.13.100:3007/install.sh | bash</code>
           <button class="copybtn" data-copy-target="#cmd-mac">kopieren</button>
         </div>
+        <p class="step-detail">
+          Installiert: Homebrew (falls fehlend) → Python 3.12 → Ollama → Nexoryx. Launchd-Service optional.
+        </p>
       </div>
 
+      <!-- Windows -->
       <div class="card" data-os-tab="Windows" style="margin-bottom:14px">
-        <h3>🪟 Windows</h3>
-        <p>Empfohlen via <b>WSL</b> (Ubuntu) oder Git-Bash. In der WSL-Shell:</p>
-        <div class="cmd" style="margin-top:12px">
+        <h3>Windows</h3>
+        <p style="color:var(--muted);font-size:14px;margin:0 0 4px">
+          <b>Option A — PowerShell (nativ, empfohlen):</b>
+          PowerShell als <b>Administrator</b> öffnen (Rechtsklick auf Startmenü → „Windows PowerShell (Administrator)"):
+        </p>
+        <div class="cmd" style="margin-bottom:10px">
+          <span class="prompt">PS&gt;</span>
+          <code id="cmd-win-ps">irm http://192.168.13.100:3007/install.ps1 | iex</code>
+          <button class="copybtn" data-copy-target="#cmd-win-ps">kopieren</button>
+        </div>
+        <p class="step-detail">
+          Installiert automatisch: Python 3.12 via <code class="inline">winget</code>,
+          Ollama (Windows-Installer), Nexoryx-Paket, Windows-Dienst (optional).
+        </p>
+
+        <p style="color:var(--muted);font-size:14px;margin:14px 0 4px">
+          <b>Option B — WSL (Ubuntu):</b>
+          WSL installieren (<code class="inline">wsl --install</code> in Admin-PowerShell), dann Ubuntu starten:
+        </p>
+        <div class="cmd">
           <span class="prompt">$</span>
-          <code id="cmd-win">curl -fsSL http://192.168.13.100:3007/install.sh | bash</code>
-          <button class="copybtn" data-copy-target="#cmd-win">kopieren</button>
+          <code id="cmd-win-wsl">curl -fsSL http://192.168.13.100:3007/install.sh | bash</code>
+          <button class="copybtn" data-copy-target="#cmd-win-wsl">kopieren</button>
+        </div>
+        <p class="step-detail">
+          Volle Linux-Kompatibilität. Empfohlen wenn du regelmäßig mit Linux-Tools arbeitest.
+        </p>
+      </div>
+    </section>
+
+    <section id="api-keys">
+      <h2><span class="num">03</span>API-Keys einrichten</h2>
+      <p class="sub">
+        Alle Keys sind <b>vollständig optional</b>. Ohne Keys läuft Nexoryx rein lokal über Ollama.
+        Mit Keys routet der Model-Router automatisch in die Cloud für bessere Qualität oder wenn
+        das lokale Modell überlastet ist.
+      </p>
+
+      <h3 class="sub-head">Welche Provider gibt es?</h3>
+      <table>
+        <thead>
+          <tr><th>Provider</th><th>Env-Variable</th><th>Key holen</th><th>Einsatz im Router</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>Anthropic (Claude)</b> <span class="badge-teal">empfohlen</span></td>
+            <td class="mono">ANTHROPIC_API_KEY</td>
+            <td><a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" style="color:var(--teal)">console.anthropic.com</a></td>
+            <td>Beste Qualität — Coding, Reasoning, komplexe Tasks</td>
+          </tr>
+          <tr>
+            <td><b>OpenAI (GPT-4o)</b></td>
+            <td class="mono">OPENAI_API_KEY</td>
+            <td><a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener" style="color:var(--teal)">platform.openai.com</a></td>
+            <td>Fallback, Vision, Embeddings</td>
+          </tr>
+          <tr>
+            <td><b>Google Gemini</b></td>
+            <td class="mono">GOOGLE_API_KEY</td>
+            <td><a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="color:var(--teal)">aistudio.google.com</a></td>
+            <td>Fallback, langer Kontext (&gt;1M Token), Vision</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 class="sub-head" style="margin-top:28px">Wie einrichten?</h3>
+
+      <div class="key-how">
+        <div class="key-step">
+          <div class="key-num">A</div>
+          <div>
+            <b>Während der Installation (einfachste Methode)</b><br />
+            <span class="muted" style="font-size:14px">
+              bootstrap.py fragt interaktiv nach jedem Provider-Key. Key eintippen oder einfach
+              <b>Enter drücken</b> zum Überspringen. Keys können jederzeit nachträglich gesetzt werden.
+            </span>
+            <div class="install-screen" style="margin-top:10px">
+              <span style="color:var(--teal)">[nexoryx]</span> Anthropic API-Key (Claude) — leer lassen = überspringen<br/>
+              <span style="color:var(--amber)">&gt;</span> sk-ant-api03-…<br/>
+              <span style="color:var(--green)">✓</span> Anthropic-Key gespeichert in ~/.nexoryx/secrets
+            </div>
+          </div>
+        </div>
+
+        <div class="key-step">
+          <div class="key-num">B</div>
+          <div>
+            <b>Nachträglich per CLI</b><br />
+            <div class="cmd" style="margin-top:8px">
+              <span class="prompt">$</span>
+              <code id="key-anthropic">nexoryx admin key set anthropic sk-ant-api03-…</code>
+              <button class="copybtn" data-copy-target="#key-anthropic">kopieren</button>
+            </div>
+            <div class="cmd" style="margin-top:8px">
+              <span class="prompt">$</span>
+              <code id="key-openai">nexoryx admin key set openai sk-proj-…</code>
+              <button class="copybtn" data-copy-target="#key-openai">kopieren</button>
+            </div>
+            <div class="cmd" style="margin-top:8px">
+              <span class="prompt">$</span>
+              <code id="key-gemini">nexoryx admin key set google AIzaSy…</code>
+              <button class="copybtn" data-copy-target="#key-gemini">kopieren</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="key-step">
+          <div class="key-num">C</div>
+          <div>
+            <b>Manuell per Umgebungsvariable</b><br />
+            <span class="muted" style="font-size:14px">Für kurzzeitige Tests oder CI — Keys in Shell setzen, Nexoryx liest sie automatisch:</span>
+            <div class="cmd" style="margin-top:8px">
+              <span class="prompt">$</span>
+              <code id="key-export">export ANTHROPIC_API_KEY="sk-ant-…"  # Linux/macOS</code>
+              <button class="copybtn" data-copy-target="#key-export">kopieren</button>
+            </div>
+            <div class="cmd" style="margin-top:8px">
+              <span class="prompt">PS&gt;</span>
+              <code id="key-export-win">$env:ANTHROPIC_API_KEY = "sk-ant-…"  # Windows PowerShell</code>
+              <button class="copybtn" data-copy-target="#key-export-win">kopieren</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="key-step">
+          <div class="key-num">D</div>
+          <div>
+            <b>Keys prüfen &amp; Budget setzen</b><br />
+            <div class="cmd" style="margin-top:8px">
+              <span class="prompt">$</span>
+              <code id="key-list">nexoryx admin key list</code>
+              <button class="copybtn" data-copy-target="#key-list">kopieren</button>
+            </div>
+            <span class="muted" style="font-size:14px">
+              Budget-Limits (z.B. max. $5/Monat pro Provider) in
+              <code class="inline">~/.nexoryx/config.yaml</code> unter <code class="inline">router.budget_caps</code>.
+              Bei Überschreitung routet Nexoryx automatisch auf lokale Modelle zurück.
+            </span>
+          </div>
         </div>
       </div>
+
+      <div class="callout" style="margin-top:18px">
+        <b>Sicherheit:</b> Keys werden ausschließlich in <code class="inline">~/.nexoryx/secrets</code>
+        (Dateiberechtigung 600) gespeichert. Das öffentliche GitHub-Repo enthält zu keiner Zeit Credentials.
+        Logs maskieren Keys automatisch (<code class="inline">sk-ant-***</code>).
+      </div>
+    </section>
+
+    <section id="ollama">
+      <h2><span class="num">04</span>Ollama-Modelle</h2>
+      <p class="sub">
+        Ollama ist die lokale Inferenz-Engine von Nexoryx. Der Installer richtet Ollama automatisch ein
+        und lädt das passende Startmodell für deine Hardware. Du kannst jederzeit weitere Modelle hinzufügen.
+      </p>
+
+      <h3 class="sub-head">Ollama manuell installieren (falls nicht automatisch)</h3>
+      <div class="card" style="margin-bottom:14px">
+        <h3>Linux / macOS</h3>
+        <div class="cmd" style="margin-top:8px">
+          <span class="prompt">$</span>
+          <code id="ollama-linux">curl -fsSL https://ollama.com/install.sh | sh</code>
+          <button class="copybtn" data-copy-target="#ollama-linux">kopieren</button>
+        </div>
+      </div>
+      <div class="card" style="margin-bottom:24px">
+        <h3>Windows</h3>
+        <p style="color:var(--muted);font-size:14px;margin:0 0 8px">
+          Ollama-Windows-Installer herunterladen und ausführen — danach läuft Ollama als Windows-Dienst:
+        </p>
+        <div class="cmd">
+          <span class="prompt">PS&gt;</span>
+          <code id="ollama-win">winget install Ollama.Ollama</code>
+          <button class="copybtn" data-copy-target="#ollama-win">kopieren</button>
+        </div>
+      </div>
+
+      <h3 class="sub-head">Empfohlene Modelle — nach Hardware-Profil</h3>
+      <table>
+        <thead>
+          <tr><th>Profil</th><th>Modell</th><th>Größe</th><th>Befehl</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td rowspan="2"><b>Ultra-Lite</b><br/><span style="color:var(--teal);font-size:12px">CPU-only, ≥4 GB RAM</span></td>
+            <td class="mono">qwen2.5:0.5b</td>
+            <td>~400 MB</td>
+            <td><code class="inline">ollama pull qwen2.5:0.5b</code></td>
+          </tr>
+          <tr>
+            <td class="mono">tinyllama</td>
+            <td>~600 MB</td>
+            <td><code class="inline">ollama pull tinyllama</code></td>
+          </tr>
+          <tr>
+            <td rowspan="3"><b>Balanced</b><br/><span style="color:var(--amber);font-size:12px">CPU/GPU, ≥8 GB RAM</span></td>
+            <td class="mono">llama3.2:3b</td>
+            <td>~2 GB</td>
+            <td><code class="inline">ollama pull llama3.2:3b</code></td>
+          </tr>
+          <tr>
+            <td class="mono">qwen2.5:7b</td>
+            <td>~5 GB</td>
+            <td><code class="inline">ollama pull qwen2.5:7b</code></td>
+          </tr>
+          <tr>
+            <td class="mono">mistral:7b</td>
+            <td>~5 GB</td>
+            <td><code class="inline">ollama pull mistral:7b</code></td>
+          </tr>
+          <tr>
+            <td rowspan="3"><b>Pro</b><br/><span style="color:var(--green);font-size:12px">GPU ≥24 GB VRAM</span></td>
+            <td class="mono">qwen2.5:32b</td>
+            <td>~20 GB</td>
+            <td><code class="inline">ollama pull qwen2.5:32b</code></td>
+          </tr>
+          <tr>
+            <td class="mono">deepseek-r1:32b</td>
+            <td>~20 GB</td>
+            <td><code class="inline">ollama pull deepseek-r1:32b</code></td>
+          </tr>
+          <tr>
+            <td class="mono">llama3.3:70b</td>
+            <td>~40 GB</td>
+            <td><code class="inline">ollama pull llama3.3:70b</code></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 class="sub-head" style="margin-top:28px">Nexoryx — Modell-Befehle</h3>
+      <table>
+        <tbody>
+          <tr>
+            <td class="mono">nexoryx models list</td>
+            <td>Alle verfügbaren &amp; installierten Modelle anzeigen (lokal + Cloud)</td>
+          </tr>
+          <tr>
+            <td class="mono">nexoryx models pull tiny</td>
+            <td>Nexoryx-Tiny (Control Brain) laden — hardware-geprüft</td>
+          </tr>
+          <tr>
+            <td class="mono">nexoryx models pull mini</td>
+            <td>Nexoryx-Mini laden (ab Balanced-Profil)</td>
+          </tr>
+          <tr>
+            <td class="mono">nexoryx models pull large</td>
+            <td>Nexoryx-Large laden (nur auf Pro-Hardware, ~20 GB)</td>
+          </tr>
+          <tr>
+            <td class="mono">nexoryx ask "…" --model ollama/qwen2.5:7b</td>
+            <td>Bestimmtes Ollama-Modell erzwingen (ohne Router-Logik)</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout" style="margin-top:18px">
+        <b>Automatische Erkennung:</b> Wenn Ollama auf Port <code class="inline">11434</code>
+        (Standard) läuft, erkennt Nexoryx es beim Start automatisch — kein manuelles Konfigurieren.
+        Laufende Modelle werden in der Modell-Registry eingetragen und stehen im Router zur Verfügung.
+        Prüfen mit: <code class="inline">nexoryx doctor</code>.
+      </div>
     </section>
 
     <section>
-      <h2><span class="num">03</span>Prüfen</h2>
+      <h2><span class="num">05</span>Prüfen</h2>
       <div class="cmd">
         <span class="prompt">$</span>
-        <code id="cmd-doctor">python3 -m nexoryx doctor</code>
+        <code id="cmd-doctor">nexoryx doctor</code>
         <button class="copybtn" data-copy-target="#cmd-doctor">kopieren</button>
       </div>
-      <p class="sub" style="margin-top:12px">Zeigt erkannte Hardware, gewähltes Profil und welche Modelle erlaubt sind.</p>
+      <p class="sub" style="margin-top:12px">
+        Zeigt: erkannte Hardware, gewähltes Profil (ultra_lite / balanced / pro),
+        installierte Ollama-Modelle, gesetzte API-Keys (maskiert), Router-Status, Daemon-Status.
+      </p>
+      <div class="cmd" style="margin-top:10px">
+        <span class="prompt">$</span>
+        <code id="cmd-first-ask">nexoryx ask "Erkläre mir kurz, was du bist."</code>
+        <button class="copybtn" data-copy-target="#cmd-first-ask">kopieren</button>
+      </div>
+      <p class="sub" style="margin-top:10px">
+        Erster echter Test — der Router wählt automatisch das beste verfügbare Modell.
+        In den Logs siehst du welches Modell gewählt wurde und warum.
+      </p>
     </section>
 
     <section>
-      <h2><span class="num">04</span>Telegram (optional)</h2>
-      <p class="sub">Während der Installation kannst du einen Bot-Token + deine Telegram-User-ID angeben.
-        Ohne Telegram: bei der Abfrage einfach überspringen (oder <code class="inline">--no-telegram</code>).</p>
+      <h2><span class="num">06</span>Telegram (optional)</h2>
+      <p class="sub">
+        Nexoryx kann vollständig über Telegram gesteuert werden — gleiche Befehle wie im Terminal,
+        plus Push-Benachrichtigungen, Datei-Upload und Approve/Deny für riskante Aktionen.
+      </p>
+      <ol class="steps">
+        <li>Bot bei <b>@BotFather</b> anlegen → <code class="inline">/newbot</code> → Token kopieren</li>
+        <li>Eigene Telegram-User-ID herausfinden: <b>@userinfobot</b> schreiben</li>
+        <li>Während Installation angeben — oder nachträglich:
+          <div class="cmd" style="margin-top:8px">
+            <span class="prompt">$</span>
+            <code id="tg-setup">nexoryx telegram setup</code>
+            <button class="copybtn" data-copy-target="#tg-setup">kopieren</button>
+          </div>
+        </li>
+        <li>Bot starten: <code class="inline">nexoryx telegram start</code> — oder automatisch über den Daemon</li>
+      </ol>
+      <p class="sub" style="margin-top:8px">
+        Ohne Telegram: bei der Abfrage einfach Enter drücken (überspringen) oder
+        Flag <code class="inline">--no-telegram</code> beim Bootstrap-Aufruf.
+      </p>
     </section>
 
     <section id="hilfe">
-      <h2><span class="num">05</span>Hilfe &amp; Troubleshooting</h2>
-      <ul>
-        <li><b>python3 nicht gefunden</b> → Python 3.11+ installieren, Terminal neu öffnen.</li>
-        <li><b>Modell zu groß / langsam</b> → normal auf schwacher Hardware; Nexoryx nutzt automatisch das kleinste passende Modell oder die Cloud.</li>
-        <li><b>Logs</b> liegen unter <code class="inline">~/.nexoryx/</code>.</li>
-      </ul>
+      <h2><span class="num">07</span>Hilfe &amp; Troubleshooting</h2>
+      <table>
+        <tbody>
+          <tr>
+            <td><b>Python nicht gefunden</b></td>
+            <td>Der Installer installiert Python automatisch. Falls manuell nötig: Ubuntu →
+              <code class="inline">sudo apt install python3.12</code>,
+              macOS → <code class="inline">brew install python@3.12</code>,
+              Windows → <code class="inline">winget install Python.Python.3.12</code>
+            </td>
+          </tr>
+          <tr>
+            <td><b>Ollama antwortet nicht</b></td>
+            <td>Status prüfen: <code class="inline">ollama list</code>.
+              Dienst starten: <code class="inline">ollama serve</code> (Linux/macOS) oder Ollama-App öffnen (Windows).
+              <code class="inline">nexoryx doctor</code> zeigt den Verbindungsstatus.
+            </td>
+          </tr>
+          <tr>
+            <td><b>Modell zu groß / langsam</b></td>
+            <td>Nexoryx wählt automatisch das kleinste passende Modell für dein Profil.
+              Alternativ: kleineres Ollama-Modell ziehen,
+              z.B. <code class="inline">ollama pull llama3.2:3b</code>.
+            </td>
+          </tr>
+          <tr>
+            <td><b>API-Key-Fehler</b></td>
+            <td>Key prüfen: <code class="inline">nexoryx admin key list</code>.
+              Neu setzen: <code class="inline">nexoryx admin key set anthropic &lt;KEY&gt;</code>.
+              Nexoryx fällt automatisch auf lokale Modelle zurück wenn ein Key fehlt/ungültig ist.
+            </td>
+          </tr>
+          <tr>
+            <td><b>PowerShell: Script-Ausführung blockiert</b></td>
+            <td>Policy kurz setzen:
+              <code class="inline">Set-ExecutionPolicy RemoteSigned -Scope CurrentUser</code>
+              (als Admin), danach nochmal versuchen.
+            </td>
+          </tr>
+          <tr>
+            <td><b>Logs &amp; Diagnose</b></td>
+            <td>Alle Logs unter <code class="inline">~/.nexoryx/logs/</code>.
+              Echtzeit-Log: <code class="inline">nexoryx logs tail</code>.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
       <div class="callout" style="margin-top:16px">
-        <b>Hinweis:</b> Installation über <code class="inline">192.168.13.100</code> = Admin-Modus.
+        <b>Hinweis:</b> Installation über <code class="inline">192.168.13.100</code> = Admin-Modus
+        (Modelle, Keys, Rollen, Logs verwalten).
         Aus dem öffentlichen Repo installiert = User-Modus (ohne Admin-Funktionen).
       </div>
     </section>

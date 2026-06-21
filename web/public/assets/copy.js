@@ -52,8 +52,33 @@
     });
   }
 
+  // --- OS-Tab-Switcher ---
+  function wireOSTabs() {
+    var tabs = document.querySelectorAll(".os-tab");
+    tabs.forEach(function (tab) {
+      tab.addEventListener("click", function () {
+        tabs.forEach(function (t) { t.classList.remove("active"); });
+        tab.classList.add("active");
+        var target = tab.getAttribute("data-tab");
+        document.querySelectorAll(".tab-panel").forEach(function (p) { p.classList.remove("active"); });
+        var panel = document.getElementById("tab-" + target);
+        if (panel) panel.classList.add("active");
+      });
+    });
+  }
+
+  // Auto-Selektion des passenden OS-Tabs
+  function autoSelectOSTab() {
+    var os = detectOS();
+    var tabId = os === "Windows" ? "windows" : "linux";
+    var tab = document.querySelector('.os-tab[data-tab="' + tabId + '"]');
+    if (tab) tab.click();
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
     wireCopy();
     showOSHint();
+    wireOSTabs();
+    autoSelectOSTab();
   });
 })();

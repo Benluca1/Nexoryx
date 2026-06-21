@@ -194,43 +194,6 @@ def cmd_train(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_ask(args: argparse.Namespace) -> int:
-    from .brain import classify
-    from .router import ChatRequest, Router, ProviderError
-
-    brain = classify(args.text)
-    if brain.trivial and brain.canned:
-        print(brain.canned)
-        return 0
-
-    hw = detect()
-    profile = choose_profile(hw)
-    router = Router(hw, profile)
-    persona = cfg_mod.load().persona
-    req = ChatRequest(
-        prompt=args.text,
-        system=persona,
-        task_type=brain.task_type,
-        sensitive=args.private,
-        max_tokens=args.max_tokens,
-    )
-    prefer_fast = args.fast and not args.quality
-    try:
-        if args.stream:
-            parts = []
-            for chunk in router.stream(req, prefer_fast=prefer_fast):
-                parts.append(chunk)
-                print(chunk, end="", flush=True)
-            print()
-            return 0
-        resp = router.route(req, prefer_fast=prefer_fast)
-    except ProviderError as exc:
-        print(_c(f"Fehler: {exc}", _RED))
-        return 1
-    print(resp.text.rstrip())
-    print(_c(f"\n— {resp.provider}/{resp.model} (task={brain.task_type})", _DIM))
-    return 0
-
 
 def cmd_panic(_args: argparse.Namespace) -> int:
     print(_c("PANIC: Kill-Switch ausgelöst — alle Tasks/Agenten würden gestoppt.", _RED))
@@ -593,26 +556,27 @@ def cmd_admin(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="nexoryx", description="Nexoryx — Multi-Agenten-KI-Framework")
-    sub = p.add_subparsers(dest="command", required=True)
+    sub = p.add_subparsers(dest="command", required=False)
 
     sub.add_parser("doctor", help="Hardware + Profil + Checks anzeigen").set_defaults(func=cmd_doctor)
     sub.add_parser("version", help="Version anzeigen").set_defaults(func=cmd_version)
 
-    ask = sub.add_parser("ask", help="Eine KI-Anfrage stellen")
-    ask.add_argument("text", help="Die Frage")
-    ask.add_argument("--fast", action="store_true", help="Geschwindigkeit bevorzugen")
-    ask.add_argument("--quality", action="store_true", help="Qualität bevorzugen")
-    ask.add_argument("--private", action="store_true", help="Nur lokale Modelle (sensibel)")
-    ask.add_argument("--stream", action="store_true", help="Token-Streaming")
-    ask.add_argument("--max-tokens", type=int, default=1024)
-    ask.set_defaults(func=cmd_ask)
-
     models = sub.add_parser("models", help="Lokale Modelle verwalten")
     msub = models.add_subparsers(dest="models_action", required=True)
-    msub.add_parser("list", help="Modelle + Gates anzeigen")
-    pull = msub.add_parser("pull", help="Modell herunterladen")
+    msub.add_parser("list", help="Modelle + Gates + verfügbare anzeigen")
+    msub.add_parser("recommend", help="hardware-empfohlenes Start-Modell")
+    pull = msub.add_parser("pull", help="Modell ziehen ('house' = Start-Modell)")
     pull.add_argument("name")
     models.set_defaults(func=cmd_models)
+
+    train = sub.add_parser("train", help="Eigenes Modell aus gesammelten Daten trainieren")
+    tsub = train.add_subparsers(dest="train_action", required=True)
+    tsub.add_parser("status", help="Flywheel-/Datensatz-Status")
+    tsub.add_parser("run", help="Training auslösen (oder Skript erzeugen)")
+    te = tsub.add_parser("export", help="Datensatz als ChatML exportieren")
+    te.add_argument("path")
+    te.add_argument("--teacher-only", action="store_true", help="nur Cloud-Beispiele")
+    train.set_defaults(func=cmd_train)
 
     sub.add_parser("panic", help="Kill-Switch: alle Tasks/Agenten stoppen").set_defaults(func=cmd_panic)
 
@@ -691,6 +655,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Hintergrund-Malware-Scan: Befunde des letzten Scans zeigen, neuen starten.
+    try:
+        from .platform.scanner import check_pending, start_background_scan
+        check_pending()
+        start_background_scan()
+    except Exception:
+        pass
+
     # Plugins früh laden, damit ihre Tools überall registriert sind.
     try:
         from .tools.registry import load_plugins
@@ -699,6 +671,9 @@ def main(argv: list[str] | None = None) -> int:
         pass
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command is None:
+        from .interfaces.tui import run as _tui
+        return _tui()
     return args.func(args)
 
 
