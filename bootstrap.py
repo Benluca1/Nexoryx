@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Nexoryx Setup-Wizard — interaktiver Erststart.
 
-Installiert automatisch alle Python-Abhängigkeiten und prüft Ollama,
-bevor der interaktive Wizard startet.
+Standalone:   python bootstrap.py
+Via Installer: python bootstrap.py --source=server --role=admin --admin-enable=TOKEN
 """
 
 from __future__ import annotations
@@ -14,13 +14,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-# src/ importierbar machen (Repo-Root → src/)
 _REPO_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(_REPO_ROOT / "src"))
 
 MIN_PY = (3, 11)
 
-# ── ANSI-Farben (früh definiert, da vor dem nexoryx-Import genutzt) ───────────
+# ── ANSI ──────────────────────────────────────────────────────────────────────
 _B   = "\033[1m"
 _DIM = "\033[2m"
 _G   = "\033[32m"
@@ -28,20 +27,26 @@ _Y   = "\033[33m"
 _C   = "\033[36m"
 _R   = "\033[31m"
 _RST = "\033[0m"
-_W = 54
+_W   = 54
 
-def _rule(char: str = "─") -> None:
-    print(f"  {_DIM}{char * _W}{_RST}")
-def _ok(msg: str)   -> None: print(f"  {_G}✓{_RST} {msg}")
-def _warn(msg: str) -> None: print(f"  {_Y}!{_RST} {msg}")
-def _err(msg: str)  -> None: print(f"  {_R}✗{_RST} {msg}")
+def _rule(ch="─"): print(f"  {_DIM}{ch * _W}{_RST}")
+def _ok(m):   print(f"  {_G}✓{_RST} {m}")
+def _warn(m): print(f"  {_Y}!{_RST} {m}")
+def _err(m):  print(f"  {_R}✗{_RST} {m}")
 
 
-# ── Auto-Dependency-Install ────────────────────────────────────────────────────
+# ── Dependency-Auto-Install ────────────────────────────────────────────────────
 
-def _pip_install(*packages: str, quiet: bool = True) -> bool:
-    """Installiert Pakete in die aktuelle Python-Umgebung."""
-    cmd = [sys.executable, "-m", "pip", "install"] + list(packages)
+def _can_import(mod: str) -> bool:
+    try:
+        __import__(mod)
+        return True
+    except ImportError:
+        return False
+
+
+def _pip(*pkgs: str, quiet: bool = True) -> bool:
+    cmd = [sys.executable, "-m", "pip", "install"] + list(pkgs)
     if quiet:
         cmd.append("-q")
     try:
@@ -52,113 +57,98 @@ def _pip_install(*packages: str, quiet: bool = True) -> bool:
 
 
 def _ensure_python_packages() -> None:
-    """Installiert Nexoryx + alle Extras falls nicht vorhanden."""
-    print(f"\n  {_B}Python-Pakete{_RST}")
-
+    print(f"\n  {_B}Python-Pakete prüfen{_RST}")
     # pip aktualisieren
     subprocess.run(
         [sys.executable, "-m", "pip", "install", "-q", "--upgrade", "pip"],
         capture_output=True,
     )
 
-    # Nexoryx selbst mit allen Extras installieren
-    pkg_spec = f"{_REPO_ROOT}[runtime,cloud,telegram]"
-    try:
-        import nexoryx  # noqa: F401 — Prüfung ob bereits installiert
-        _ok("Nexoryx-Paket bereits installiert")
-    except ImportError:
+    # Nexoryx-Paket selbst
+    if not _can_import("nexoryx"):
         print("  Installiere Nexoryx + Abhängigkeiten …")
-        if _pip_install("-e", pkg_spec):
-            _ok("Nexoryx-Paket installiert")
+        spec = f"{_REPO_ROOT}[runtime,cloud,telegram]"
+        if _pip("-e", spec):
+            _ok("Nexoryx installiert")
         else:
-            _warn("Paket-Installation teilweise fehlgeschlagen — läuft trotzdem via src/")
+            _warn("Installation fehlgeschlagen — läuft weiter via src/")
+    else:
+        _ok("Nexoryx-Paket vorhanden")
 
-    # Einzelne optionale Extras sauber prüfen & nachinstallieren
-    _extras = {
-        "anthropic":          "anthropic>=0.40",
-        "openai":             "openai>=1.40",
-        "google.genai":       "google-genai>=0.3",
-        "telegram":           "python-telegram-bot>=21",
-        "fastapi":            "fastapi>=0.110",
-        "pydantic":           "pydantic>=2.6",
-        "typer":              "typer>=0.12",
-        "rich":               "rich>=13",
-        "httpx":              "httpx>=0.27",
-        "pytest":             "pytest>=8",
+    # Alle optionalen Extras einzeln prüfen und ggf. nachinstallieren
+    extras = {
+        "anthropic":    "anthropic>=0.40",
+        "openai":       "openai>=1.40",
+        "google.genai": "google-genai>=0.3",
+        "telegram":     "python-telegram-bot>=21",
+        "fastapi":      "fastapi>=0.110",
+        "uvicorn":      "uvicorn>=0.29",
+        "pydantic":     "pydantic>=2.6",
+        "typer":        "typer>=0.12",
+        "rich":         "rich>=13",
+        "httpx":        "httpx>=0.27",
+        "pytest":       "pytest>=8",
     }
-    missing = []
-    for mod, spec in _extras.items():
-        try:
-            __import__(mod)
-        except ImportError:
-            missing.append(spec)
-
+    missing = [spec for mod, spec in extras.items() if not _can_import(mod)]
     if missing:
         print(f"  Installiere {len(missing)} fehlende Pakete …")
-        if _pip_install(*missing):
+        if _pip(*missing):
             _ok(f"{len(missing)} Pakete installiert")
         else:
-            _warn("Einige optionale Pakete konnten nicht installiert werden")
+            _warn("Einige optionale Pakete fehlgeschlagen")
     else:
         _ok("Alle Python-Pakete vorhanden")
 
 
 def _ensure_ollama() -> None:
-    """Installiert Ollama falls nicht vorhanden."""
     print(f"\n  {_B}Ollama{_RST}")
     if shutil.which("ollama"):
         _ok("Ollama bereits installiert")
         return
-
     print("  Ollama nicht gefunden — wird installiert …")
     if sys.platform == "win32":
-        _warn("Windows: Ollama bitte manuell installieren: winget install Ollama.Ollama")
+        _warn("Windows: bitte manuell ausführen:  winget install Ollama.Ollama")
         return
-
     try:
-        result = subprocess.run(
+        r = subprocess.run(
             "curl -fsSL https://ollama.com/install.sh | sh",
             shell=True, capture_output=True, text=True, timeout=300,
         )
-        if result.returncode == 0:
+        if r.returncode == 0:
             _ok("Ollama installiert")
         else:
-            _warn(f"Ollama-Installation fehlgeschlagen: {result.stderr[:100]}")
+            _warn(f"Ollama-Installation fehlgeschlagen: {r.stderr[:100]}")
     except subprocess.TimeoutExpired:
-        _warn("Ollama-Installation: Timeout (zu langsam) — bitte manuell installieren")
-    except OSError as exc:
-        _warn(f"Ollama-Installation: {exc}")
+        _warn("Timeout — Ollama bitte manuell installieren: https://ollama.com")
+    except OSError as e:
+        _warn(f"Ollama-Installation: {e}")
 
 
 def _ensure_clamav() -> None:
-    """Installiert ClamAV (optional, für Hintergrund-Virenscanner)."""
+    if sys.platform == "win32":
+        return  # Windows Defender übernimmt
     print(f"\n  {_B}ClamAV (Virus-Scanner){_RST}")
     if shutil.which("clamscan"):
         _ok("ClamAV bereits installiert")
         return
-
-    # Paketmanager-Erkennung
-    pm = None
-    for cmd, name in [("apt-get","apt"), ("dnf","dnf"), ("pacman","pacman"), ("brew","brew")]:
-        if shutil.which(cmd):
-            pm = name
-            break
-
+    pm = next(
+        (n for cmd, n in [("apt-get","apt"),("dnf","dnf"),("pacman","pacman"),("brew","brew")]
+         if shutil.which(cmd)),
+        None,
+    )
     if pm is None:
-        _warn("ClamAV: kein bekannter Paketmanager — manuell installieren (optional)")
+        _warn("ClamAV: kein Paketmanager gefunden — manuell installieren (optional)")
         return
-
-    print("  Installiere ClamAV (optional) …")
-    cmd_map = {
+    print("  Installiere ClamAV …")
+    cmds = {
         "apt":    ["sudo", "apt-get", "install", "-y", "-qq", "clamav"],
         "dnf":    ["sudo", "dnf", "install", "-y", "-q", "clamav"],
         "pacman": ["sudo", "pacman", "-S", "--noconfirm", "clamav"],
         "brew":   ["brew", "install", "clamav"],
     }
     try:
-        r = subprocess.run(cmd_map[pm], capture_output=True, text=True, timeout=120)
+        r = subprocess.run(cmds[pm], capture_output=True, text=True, timeout=120)
         if r.returncode == 0:
-            # Signaturen aktualisieren
             subprocess.run(["sudo", "freshclam", "--quiet"],
                            capture_output=True, timeout=120, check=False)
             _ok("ClamAV installiert + Signaturen aktualisiert")
@@ -168,21 +158,24 @@ def _ensure_clamav() -> None:
         _warn("ClamAV konnte nicht installiert werden — manuell nachholbar")
 
 
-# ── Abhängigkeiten sicherstellen (läuft vor allen Imports) ──────────────────
+# ── Früh: Wurde vom Installer aufgerufen? ─────────────────────────────────────
+# install.sh / install.ps1 haben Pakete bereits installiert → kein Doppellauf.
+_CALLED_FROM_INSTALLER = any("--source" in a for a in sys.argv[1:])
 
-_ensure_python_packages()
-_ensure_ollama()
-_ensure_clamav()
+if not _CALLED_FROM_INSTALLER:
+    _ensure_python_packages()
+    _ensure_ollama()
+    _ensure_clamav()
 
-# Jetzt können wir Nexoryx-Module sicher importieren
+# Ab hier sind alle Nexoryx-Module garantiert importierbar
 from nexoryx import __version__
 from nexoryx.platform import detect, choose_profile, model_gates
 from nexoryx.platform import config as cfg_mod
 
+
 # ── Interaktive Widgets ────────────────────────────────────────────────────────
 
 def _select(question: str, choices: list[str], default: int = 0) -> int:
-    """Pfeiltasten-Einfachauswahl. Gibt den Index zurück."""
     if not sys.stdin.isatty():
         return default
     try:
@@ -206,7 +199,6 @@ def _select(question: str, choices: list[str], default: int = 0) -> int:
     sys.stdout.write(out)
     sys.stdout.flush()
     n_lines = out.count("\n")
-
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     try:
@@ -232,13 +224,11 @@ def _select(question: str, choices: list[str], default: int = 0) -> int:
             n_lines = out.count("\n")
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
-
     sys.stdout.write("\n")
     return current[0]
 
 
 def _multiselect(question: str, choices: list[str], defaults: list[int] | None = None) -> list[int]:
-    """Pfeiltasten + Leertaste für Mehrfachauswahl."""
     if not sys.stdin.isatty():
         return defaults or []
     try:
@@ -265,7 +255,6 @@ def _multiselect(question: str, choices: list[str], defaults: list[int] | None =
     sys.stdout.write(out)
     sys.stdout.flush()
     n_lines = out.count("\n")
-
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     try:
@@ -296,7 +285,6 @@ def _multiselect(question: str, choices: list[str], defaults: list[int] | None =
             n_lines = out.count("\n")
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
-
     sys.stdout.write("\n")
     return sorted(selected)
 
@@ -304,11 +292,12 @@ def _multiselect(question: str, choices: list[str], defaults: list[int] | None =
 def _select_plain(question: str, choices: list[str], default: int) -> int:
     print(f"\n  {question}")
     for i, c in enumerate(choices):
-        marker = "→" if i == default else " "
-        print(f"  {marker} [{i + 1}] {c}")
+        print(f"  {'→' if i == default else ' '} [{i+1}] {c}")
     while True:
         try:
-            raw = input(f"  Auswahl [1–{len(choices)}]: ").strip()
+            raw = input(f"  Auswahl [1–{len(choices)}, Enter={default+1}]: ").strip()
+            if not raw:
+                return default
             idx = int(raw) - 1
             if 0 <= idx < len(choices):
                 return idx
@@ -319,9 +308,8 @@ def _select_plain(question: str, choices: list[str], default: int) -> int:
 def _multiselect_plain(question: str, choices: list[str], defaults: list[int]) -> list[int]:
     print(f"\n  {question} (Nummern mit Komma, z.B. 1,3):")
     for i, c in enumerate(choices):
-        d = "*" if i in defaults else " "
-        print(f"  [{d}] [{i + 1}] {c}")
-    raw = input("  Auswahl: ").strip()
+        print(f"  [{'*' if i in defaults else ' '}] [{i+1}] {c}")
+    raw = input("  Auswahl (Enter = Standard): ").strip()
     if not raw:
         return defaults
     result = []
@@ -341,11 +329,9 @@ def _banner() -> None:
     print()
     _rule("━")
     title = "N  E  X  O  R  Y  X"
-    sub   = "Setup-Wizard"
-    pad_t = (_W - len(title)) // 2
-    pad_s = (_W - len(sub))   // 2
-    print(f"  {' ' * pad_t}{_C}{_B}{title}{_RST}")
-    print(f"  {' ' * pad_s}{_DIM}{sub}{_RST}")
+    sub   = f"Setup-Wizard  v{__version__}"
+    print(f"  {' ' * ((_W - len(title)) // 2)}{_C}{_B}{title}{_RST}")
+    print(f"  {' ' * ((_W - len(sub))   // 2)}{_DIM}{sub}{_RST}")
     _rule("━")
     print()
 
@@ -353,11 +339,21 @@ def _banner() -> None:
 # ── Hauptprogramm ──────────────────────────────────────────────────────────────
 
 def main() -> int:
+    import argparse as _ap
+    parser = _ap.ArgumentParser(add_help=False)
+    parser.add_argument("--role",          default="user")
+    parser.add_argument("--admin-enable",  default="", dest="admin_enable")
+    parser.add_argument("--source",        default="manual")
+    args, _ = parser.parse_known_args()
+
+    # Rolle per Admin-Token ableiten (Plan §16.3)
+    role = cfg_mod.resolve_role(args.admin_enable, args.source)
+
     _banner()
 
     # 1) Python-Version
     if sys.version_info < MIN_PY:
-        _warn(f"Python {MIN_PY[0]}.{MIN_PY[1]}+ empfohlen (gefunden {sys.version.split()[0]})")
+        _warn(f"Python {MIN_PY[0]}.{MIN_PY[1]}+ empfohlen (läuft mit {sys.version.split()[0]})")
     else:
         _ok(f"Python {sys.version.split()[0]}")
 
@@ -365,94 +361,130 @@ def main() -> int:
     print(f"\n  {_B}Hardware-Analyse{_RST}")
     hw = detect()
     profile = choose_profile(hw)
-    gates = model_gates(hw)
+    gates   = model_gates(hw)
     _ok(f"{hw.cpu_model}  ·  {hw.cpu_cores_logical} Kerne  ·  {hw.ram_mb} MB RAM")
     gpu_label = hw.gpu.name or hw.gpu.vendor
     if hw.gpu.vram_mb:
         gpu_label += f" ({hw.gpu.vram_mb} MB VRAM)"
     _ok(f"GPU: {gpu_label}")
-    allowed = [m for m, ok in gates.items() if ok]
     _ok(f"Profil: {_B}{profile.name}{_RST}  →  {_DIM}{profile.reason}{_RST}")
-    _ok(f"Erlaubte Modelle: {', '.join(allowed)}")
+    allowed = [m for m, ok in gates.items() if ok]
+    _ok(f"Erlaubte Modelle: {', '.join(allowed) or '—'}")
 
-    # 3) Cloud-Provider einrichten?
-    providers = ["Anthropic Claude (empfohlen)", "OpenAI GPT", "Google Gemini", "Keinen — nur lokal"]
+    # 3) Ollama-Modell ziehen?
+    print(f"\n  {_B}Ollama-Startmodell{_RST}")
+    try:
+        from nexoryx.training.house import recommended_base
+        base = recommended_base(profile, hw)
+        rec_tag = base["ollama"]
+    except Exception:
+        rec_tag = "qwen2.5:0.5b" if hw.ram_mb < 8000 else "qwen2.5:7b"
+
+    if shutil.which("ollama"):
+        # Wenn vom Installer aufgerufen: Modell wird schon im Hintergrund geladen → Standard "Nein"
+        pull_default = 1 if args.source == "server" else 0
+        pull_idx = _select(
+            f"Empfohlenes Modell '{rec_tag}' jetzt laden?",
+            [f"Ja, '{rec_tag}' laden (~{'5 GB' if '7b' in rec_tag else '400 MB'})",
+             "Später manuell:  ollama pull <modell>"],
+            default=pull_default,
+        )
+        if pull_idx == 0:
+            print(f"  Lade {rec_tag} …")
+            r = subprocess.run(["ollama", "pull", rec_tag], capture_output=False)
+            if r.returncode == 0:
+                _ok(f"{rec_tag} geladen")
+            else:
+                _warn(f"Pull fehlgeschlagen — manuell: ollama pull {rec_tag}")
+    else:
+        _warn("Ollama nicht gefunden — Modell-Download übersprungen")
+        _warn("Ollama installieren: https://ollama.com  oder:  curl -fsSL https://ollama.com/install.sh | sh")
+        rec_tag = ""
+
+    # 4) Cloud-Provider
+    providers = ["Anthropic Claude (empfohlen)", "OpenAI GPT-4o", "Google Gemini", "Keinen — nur lokal"]
     chosen = _multiselect(
         "Cloud-Provider einrichten (Leertaste = auswählen):",
         providers,
         defaults=[0],
     )
-
     key_map = {0: "ANTHROPIC_API_KEY", 1: "OPENAI_API_KEY", 2: "GEMINI_API_KEY"}
     any_key = False
     for idx in chosen:
-        if idx not in key_map:
+        env = key_map.get(idx)
+        if env is None:
             continue
-        env = key_map[idx]
         pname = providers[idx].split(" (")[0]
-        print(f"\n  {_B}{pname}{_RST} API-Key eingeben:")
+        print(f"\n  {_B}{pname}{_RST} — API-Key eingeben (Enter = überspringen):")
         try:
             value = getpass.getpass(f"  {env}: ").strip()
         except (EOFError, KeyboardInterrupt):
-            _warn(f"{pname} übersprungen.")
+            _warn(f"{pname} übersprungen")
             continue
         if value:
             cfg_mod.set_secret(env, value)
             _ok(f"{pname} konfiguriert")
             any_key = True
         else:
-            _warn(f"{pname} übersprungen (kein Wert eingegeben)")
+            _warn(f"{pname} übersprungen")
 
     if not any_key and 3 not in chosen:
-        _warn("Kein Cloud-Key gesetzt — nur lokale Modelle verfügbar.")
+        _warn("Kein Cloud-Key gesetzt — Nexoryx läuft nur lokal über Ollama.")
 
-    # 4) Telegram
+    # 5) Telegram
     tg_idx = _select(
         "Telegram-Bot einrichten?",
-        ["Jetzt einrichten", "Später (nexoryx admin telegram)"],
+        ["Jetzt einrichten", "Später  (nexoryx admin telegram)"],
         default=1,
     )
     if tg_idx == 0:
         print(f"\n  {_B}Telegram-Setup{_RST}")
+        print(f"  {_DIM}Bot erstellen: @BotFather → /newbot  ·  User-ID: @userinfobot{_RST}")
         try:
-            token = getpass.getpass("  TELEGRAM_BOT_TOKEN: ").strip()
-            admin_id = input("  Deine Telegram-User-ID: ").strip()
+            token    = getpass.getpass("  TELEGRAM_BOT_TOKEN: ").strip()
+            admin_id = input("  Deine Telegram-User-ID (Zahl): ").strip()
         except (EOFError, KeyboardInterrupt):
-            _warn("Telegram übersprungen.")
+            _warn("Telegram übersprungen")
             token, admin_id = "", ""
         if token:
             cfg_mod.set_secret("TELEGRAM_BOT_TOKEN", token)
+            _ok("Telegram-Token gespeichert")
         cfg = cfg_mod.load()
         if admin_id:
             cfg.telegram_admin_id = admin_id
             cfg_mod.save(cfg)
+            _ok(f"Telegram-Admin-ID: {admin_id}")
         if token:
-            _ok("Telegram konfiguriert — start mit: nex telegram")
+            _ok("Telegram konfiguriert — starten mit:  nexoryx telegram")
 
-    # 5) Config speichern
-    from nexoryx.training.house import recommended_base
-    base = recommended_base(profile, hw)
+    # 6) Config speichern
     cfg = cfg_mod.load()
-    cfg.profile  = profile.name
-    cfg.house_base = base["ollama"]
-    cfg.version  = __version__
+    cfg.role           = role
+    cfg.install_source = args.source
+    cfg.profile        = profile.name
+    cfg.version        = __version__
+    if rec_tag:
+        cfg.house_base = rec_tag
     cfg_mod.save(cfg)
 
-    # 6) Abschluss
+    # 7) Abschluss
     print()
     _rule("━")
-    title2 = "Fertig! 🎉"
-    pad2 = (_W - len(title2)) // 2
-    print(f"  {' ' * pad2}{_G}{_B}{title2}{_RST}")
+    msg = "Nexoryx ist bereit!"
+    print(f"  {' ' * ((_W - len(msg)) // 2)}{_G}{_B}{msg}{_RST}")
     _rule("━")
+    inst = "admin" if role == "admin" else "user"
     print(f"""
+  {_B}Rolle:{_RST}  {_C}{role}{_RST}  ·  Profil: {_C}{profile.name}{_RST}  ·  Install: {inst}
+
   {_B}Loslegen:{_RST}
+    {_C}nex{_RST}                  TUI starten (Fragen stellen)
+    {_C}nexoryx doctor{_RST}       Hardware + Profil + Modelle prüfen
+    {_C}nexoryx ask "Hallo"{_RST}  Erste Frage (Router wählt automatisch)
+    {_C}nexoryx models list{_RST}  Verfügbare Modelle anzeigen
 
-    {_C}nex{_RST}            TUI starten (Fragen stellen, /commands)
-    {_C}nex doctor{_RST}     Hardware + Profil prüfen
-    {_C}nex models list{_RST}  Verfügbare Modelle anzeigen
-
-  {_DIM}Lokales Modell:  nex models pull house{_RST}
+  {_DIM}Lokales Modell ziehen:  nexoryx models pull house{_RST}
+  {_DIM}Cloud-Key setzen:       nexoryx admin keys set anthropic{_RST}
 """)
     return 0
 
