@@ -15,6 +15,7 @@ try:
     from rich.live import Live
     from rich.rule import Rule
     from rich.align import Align
+    from rich.table import Table
     from rich import box
     HAS_RICH = True
 except ImportError:
@@ -32,9 +33,25 @@ except ImportError:
 # ── Farbpalette ───────────────────────────────────────────────────────────────
 _AMBER     = "#C8901A"
 _AMBER_DIM = "#7A5510"
+_AMBER_HI  = "#F5C242"
 _SLATE     = "#5F7FA8"
+_SLATE_DIM = "#3A5068"
 _GREEN     = "#4CAF50"
 _YELLOW    = "#F5C242"
+
+# ── Maskottchen ───────────────────────────────────────────────────────────────
+# Nexo — stilisierter Oryx-Roboter (Hörner oben, Schaltkreis-Gesicht)
+_MASCOT = [
+    #  idx  content                   bright?
+    (False, "       │     │       "),
+    (False, "       │     │       "),
+    (True,  "  ╔════╧═════╧════╗  "),
+    (True,  "  ║   ◈       ◈   ║  "),
+    (False, "  ║     ╭───╮     ║  "),
+    (True,  "  ║     │ N │     ║  "),
+    (False, "  ║     ╰───╯     ║  "),
+    (True,  "  ╚═══════════════╝  "),
+]
 
 _SLASH = [
     "/help", "/clear", "/doctor", "/models", "/usage",
@@ -259,35 +276,54 @@ def run() -> int:
         def confirm_cb(tool, args) -> bool:
             cmd_str = args.get("command") or args.get("path") or str(args)
             console.print()
+            t = Text()
+            t.append(f"  {cmd_str}", style="bold white", overflow="fold")
             console.print(Panel(
-                Text(f"  {cmd_str}", style="white", overflow="fold"),
-                title=f"[{_YELLOW}]⚡ {tool.name}[/{_YELLOW}]",
+                t,
+                title=f"[bold {_YELLOW}]⚡  {tool.name}[/bold {_YELLOW}]  [dim]Bestätigung nötig[/dim]",
+                title_align="left",
                 border_style=_YELLOW,
-                box=box.HEAVY_HEAD,
-                padding=(0, 1),
+                box=box.HEAVY,
+                padding=(0, 2),
             ))
             try:
                 ans = console.input(
-                    f"  [{_YELLOW}]Ausführen?[/{_YELLOW}]  [[bold]Enter[/bold]/j]a  [dim]n[/dim]ein:  "
+                    f"  [{_YELLOW}]Ausführen?[/{_YELLOW}]  "
+                    f"[[bold]Enter[/bold] = ja]  [[dim]n[/dim] = nein]:  "
                 ).strip().lower()
             except (EOFError, KeyboardInterrupt):
                 return False
             ok = ans not in ("n", "nein", "no")
-            console.print(f"  [green]✓[/green]" if ok else f"  [dim]✗ übersprungen[/dim]")
+            if ok:
+                console.print(f"  [bold {_GREEN}]✓[/bold {_GREEN}]  [dim]Ausgeführt[/dim]")
+            else:
+                console.print(f"  [dim]✗  Übersprungen[/dim]")
             return ok
 
+        _STEP_ICONS = {
+            "terminal":   "⚡",
+            "fs_read":    "◎",
+            "fs_write":   "✎",
+            "web_search": "◌",
+        }
+
         def on_step(name: str, args: dict) -> None:
+            icon   = _STEP_ICONS.get(name, "◆")
             detail = args.get("command") or args.get("query") or args.get("path") or ""
-            console.print(
-                f"  [{_AMBER_DIM}]→[/{_AMBER_DIM}]  [dim]{name}[/dim]  {str(detail)[:80]}"
-            )
+            t = Text()
+            t.append(f"  {icon} ", style=f"bold {_AMBER}")
+            t.append(name, style=_AMBER_DIM)
+            t.append("  ", style="")
+            t.append(str(detail)[:90], style="dim")
+            console.print(t)
 
         console.print()
         try:
+            pdisp = current_personality.get("display_name", "Nexoryx") if current_personality else "Nexoryx"
             with console.status(
-                f"  [{_AMBER_DIM}]◆  {current_personality.get('display_name','Nexoryx')} …[/{_AMBER_DIM}]",
-                spinner="arc",
-                spinner_style=_AMBER,
+                f"[bold {_AMBER}]◆[/bold {_AMBER}]  [{_AMBER_DIM}]{pdisp} denkt …[/{_AMBER_DIM}]",
+                spinner="dots2",
+                spinner_style=_AMBER_HI,
             ):
                 answer, steps = run_fc(
                     user, ctx,
@@ -342,54 +378,74 @@ def _chat_fallback(router, user: str, history: list, mem, cfg, private: bool) ->
 
 def _banner(console: "Console", profile, fc_model: str | None = None,
             personality: dict | None = None) -> None:
+    """Banner mit Maskottchen links, Titeltext rechts."""
     console.print()
     console.rule(style=_AMBER_DIM)
 
-    title = Text()
-    title.append("  ◆  ", style=f"bold {_AMBER}")
-    title.append("N", style=f"bold {_AMBER}")
-    title.append("EX", style=_AMBER)
-    title.append("O", style=f"bold {_AMBER}")
-    title.append("RY", style=_AMBER)
-    title.append("X", style=f"bold {_AMBER}")
-    title.append("  ◆", style=f"bold {_AMBER}")
-    console.print(Align.center(title))
+    # Maskottchen als Rich-Text
+    mascot_t = Text()
+    for bright, line in _MASCOT:
+        style = f"bold {_AMBER_HI}" if bright else _AMBER_DIM
+        mascot_t.append(line + "\n", style=style)
 
-    sub = Text()
+    # Titelblock rechts
     pname = personality.get("display_name", "Nex") if personality else "Nex"
-    sub.append(pname, style=f"bold {_AMBER}")
-    sub.append("  ·  ", style="dim")
-    sub.append(profile.name, style=f"{_AMBER_DIM}")
-    if fc_model:
-        sub.append("  ·  ", style="dim")
-        sub.append(fc_model, style=f"{_AMBER_DIM}")
-    sub.append("  ·  ", style="dim")
-    sub.append("/help", style=f"italic {_AMBER_DIM}")
-    console.print(Align.center(sub))
+    tone  = personality.get("tone", "") if personality else ""
 
+    info = Text()
+    info.append("\n")
+    # Großer Titel — leicht letter-spaced
+    info.append("N E X O R Y X\n", style=f"bold {_AMBER_HI}")
+    info.append("─" * 16 + "\n", style=_AMBER_DIM)
+    info.append(f"◆  {pname}", style=f"bold {_AMBER}")
+    if tone:
+        info.append(f"  ·  {tone}", style=f"italic {_AMBER_DIM}")
+    info.append("\n")
+    info.append(f"   {profile.name}", style=_AMBER_DIM)
+    if fc_model:
+        info.append(f"  ·  {fc_model}", style=_AMBER_DIM)
+    info.append("\n\n")
+    info.append("   /help", style=f"{_AMBER_DIM}")
+    info.append("  /personality", style=f"{_AMBER_DIM}")
+    info.append("  /exit\n", style=f"{_AMBER_DIM}")
+
+    grid = Table.grid(padding=(0, 2))
+    grid.add_column(justify="left", vertical="middle")
+    grid.add_column(justify="left", vertical="middle")
+    grid.add_row(mascot_t, info)
+
+    console.print(Align.center(grid))
     console.rule(style=_AMBER_DIM)
     console.print()
 
 
 def _print_user(console: "Console", text: str) -> None:
+    """Nutzereingabe — rechts ausgerichtet, Slate-Farbe."""
     console.print()
-    console.print(Panel(
-        Text(text, overflow="fold", style="white"),
-        title=f"[{_SLATE}]Du[/{_SLATE}]",
-        title_align="left",
-        border_style=_SLATE,
-        box=box.SIMPLE_HEAD,
-        padding=(0, 1),
-    ))
+    label = Text(" Du ", style=f"bold {_SLATE}")
+    body  = Text(text, overflow="fold", style="white")
+    p = Panel(
+        body,
+        title=f"[bold {_SLATE}]● Du[/bold {_SLATE}]",
+        title_align="right",
+        border_style=_SLATE_DIM,
+        box=box.ROUNDED,
+        padding=(0, 2),
+    )
+    console.print(Align.right(p, width=min(console.width - 2, console.width)))
 
 
 def _bot_panel(content: str, label: str, done: bool) -> "Panel":
-    border = _AMBER if done else _AMBER_DIM
-    spinner = "" if done else " [dim]●[/dim]"
-    title = f"[bold {_AMBER}]◆ Nexoryx[/bold {_AMBER}]{spinner}  [dim]{label}[/dim]"
+    border  = _AMBER if done else _AMBER_DIM
+    title_t = Text()
+    title_t.append("◆ NEXO", style=f"bold {_AMBER_HI}")
+    title_t.append("RYX", style=f"bold {_AMBER}")
+    if not done:
+        title_t.append(" ●", style=f"dim {_AMBER_DIM}")
+    title_t.append(f"  {label}", style="dim")
     body = Markdown(content) if content.strip() else Text("…", style="dim")
-    return Panel(body, title=title, title_align="left",
-                 border_style=border, box=box.HEAVY_HEAD, padding=(0, 1))
+    return Panel(body, title=title_t, title_align="left",
+                 border_style=border, box=box.HEAVY_HEAD, padding=(1, 2))
 
 
 def _print_bot(console: "Console", content: str, label: str) -> None:
@@ -403,22 +459,31 @@ def _cmd_personality_list(console: "Console", current: dict) -> None:
     from ..memory.personalities import list_personalities
     plist = list_personalities()
     console.print()
+
+    rows = Text()
+    for p in plist:
+        is_cur = p["name"] == current.get("name")
+        rows.append("  ◆  " if is_cur else "     ", style=f"bold {_AMBER_HI}" if is_cur else "dim")
+        rows.append(p["display_name"], style=f"bold {_AMBER}" if is_cur else "white")
+        rows.append(f"  [{p['name']}]", style=_AMBER_DIM if is_cur else "dim")
+        if p.get("tone"):
+            rows.append(f"  —  {p['tone']}", style=f"italic {_AMBER_DIM}" if is_cur else "italic dim")
+        if p.get("is_default"):
+            rows.append("  (Standard)", style="dim")
+        rows.append("\n")
+
     console.print(Panel(
-        "\n".join(
-            f"  [{'bold ' + _AMBER if p['name'] == current['name'] else 'dim'}]"
-            f"{'◆ ' if p['name'] == current['name'] else '  '}"
-            f"{p['display_name']}[/{'bold ' + _AMBER if p['name'] == current['name'] else 'dim'}]"
-            f"  [dim]{p['name']}[/dim]"
-            + (f"  [dim]— {p.get('tone','')}[/dim]" if p.get("tone") else "")
-            + (" [dim](Standard)[/dim]" if p.get("is_default") else "")
-            for p in plist
-        ),
-        title=f"[{_AMBER}]● Persönlichkeiten[/{_AMBER}]",
+        rows,
+        title=f"[bold {_AMBER}]◆  Persönlichkeiten[/bold {_AMBER}]",
+        title_align="left",
         border_style=_AMBER_DIM,
-        box=box.ROUNDED,
-        padding=(0, 1),
+        box=box.HEAVY_HEAD,
+        padding=(0, 2),
     ))
-    console.print(f"  [dim]Wechseln: /personality <name>  ·  Erstellen: /personality create[/dim]")
+    console.print(
+        f"  [dim]Wechseln:[/dim] [bold]/personality <name>[/bold]  "
+        f"[dim]·  Erstellen:[/dim] [bold]/personality create[/bold]"
+    )
 
 
 def _cmd_personality_create(console: "Console") -> dict:
