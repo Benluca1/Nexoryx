@@ -88,7 +88,7 @@ def run() -> int:
         _session: PromptSession = PromptSession(
             completer=WordCompleter(_SLASH, sentence=True),
             history=InMemoryHistory(),
-            style=PTStyle.from_dict({"prompt": f"bold {_AMBER[1:]}"}),
+            style=PTStyle.from_dict({"prompt": f"bold {_AMBER}"}),
         )
 
     def _get_input() -> str:
