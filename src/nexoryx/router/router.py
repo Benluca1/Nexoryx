@@ -89,6 +89,7 @@ class Router:
             try:
                 resp = provider.generate(req, spec.name)
                 self._track(spec, req, resp)
+                self._learn(spec, req, resp.text)
                 return resp
             except ProviderError as exc:
                 last_err = exc
@@ -97,6 +98,21 @@ class Router:
             raise last_err
         raise ProviderError("Kein Modell verfügbar")
 
+    @staticmethod
+    def _learn(spec: ModelSpec, req: ChatRequest, text: str) -> None:
+        """Flywheel: jede echte Antwort (Cloud ODER lokal) als Trainingsdatum."""
+        if not cfg_mod.load().learn:
+            return
+        try:
+            from ..training import record_interaction
+            record_interaction(
+                req.prompt, req.system, text,
+                provider=spec.provider, model=spec.name,
+                task_type=req.task_type, is_local=spec.is_local,
+            )
+        except Exception:  # Datenerfassung darf nie den Request brechen
+            pass
+
     def stream(self, req: ChatRequest, prefer_fast: bool = False):
         """Token-Stream über das bestbewertete Modell (Fallback vor erstem Token)."""
         chain = self.rank(req, prefer_fast)
@@ -104,10 +120,13 @@ class Router:
         for spec, provider in chain:
             try:
                 got = False
+                parts: list[str] = []
                 for chunk in provider.stream(req, spec.name):
                     got = True
+                    parts.append(chunk)
                     yield chunk
                 if got:
+                    self._learn(spec, req, "".join(parts))
                     return
             except ProviderError as exc:
                 last_err = exc

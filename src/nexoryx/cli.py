@@ -104,26 +104,94 @@ def cmd_version(_args: argparse.Namespace) -> int:
 
 
 def cmd_models(args: argparse.Namespace) -> int:
+    import subprocess
+    from .training import recommended_base
     hw = detect()
+    profile = choose_profile(hw)
     gates = model_gates(hw)
+
+    if args.models_action == "recommend":
+        base = recommended_base(profile, hw)
+        _header("Empfohlenes Start-Modell (hardware-basiert)")
+        _kv("Profil", profile.name)
+        _kv("Ollama-Tag", base["ollama"])
+        _kv("HuggingFace", base["hf"])
+        _kv("Hinweis", base["note"])
+        print(_c("\n  Ziehen mit:  nexoryx models pull house", _DIM))
+        return 0
+
     if args.models_action == "list":
-        _header("Modelle")
+        _header("Modell-Gates (eigene Familie)")
         for model, allowed in gates.items():
-            status = "erlaubt" if allowed else "HW zu schwach"
-            _kv(model, status)
+            _kv(model, "erlaubt" if allowed else "HW zu schwach")
+        from .router import available_models
+        _header("Aktuell verfügbar (Router)")
+        for spec, prov in available_models():
+            _kv(spec.name, f"{prov.name} ({'lokal' if spec.is_local else 'cloud'})")
         print()
         return 0
+
     if args.models_action == "pull":
         name = args.name
-        if name not in gates:
-            print(_c(f"Unbekanntes Modell: {name}", _RED))
-            return 1
-        if not gates[name]:
-            print(_c(f"'{name}' ist auf dieser Hardware nicht erlaubt (Gate).", _YELLOW))
-            return 1
-        print(f"[stub] Würde '{name}' herunterladen — Download-Backend folgt in Phase 1.")
+        if name == "house":
+            base = recommended_base(profile, hw)
+            tag = base["ollama"]
+            if not shutil_which("ollama"):
+                print(_c("Ollama nicht gefunden. Installiere Ollama, dann erneut.", _YELLOW))
+                print(f"  Manuell:  ollama pull {tag}")
+                return 1
+            print(f"→ ziehe Start-Modell {tag} via Ollama …")
+            rc = subprocess.run(["ollama", "pull", tag]).returncode
+            if rc == 0:
+                cfg = cfg_mod.load(); cfg.house_base = tag; cfg_mod.save(cfg)
+                print(f"✓ House-Base gesetzt: {tag}")
+            return rc
+        print(f"[stub] '{name}': eigenes Modell-Training via 'nexoryx train'.")
         return 0
     return 1
+
+
+def shutil_which(cmd: str):
+    import shutil
+    return shutil.which(cmd)
+
+
+def cmd_train(args: argparse.Namespace) -> int:
+    import os
+    from .training import train, train_report, export_chatml
+    if args.train_action == "status":
+        r = train_report()
+        st = r["dataset"]
+        _header("Flywheel / House-Model")
+        _kv("Gesammelte Beispiele", str(st["total"]))
+        _kv("davon Teacher (Cloud)", str(st["teacher"]))
+        _kv("Quellen", ", ".join(f"{k}:{v}" for k, v in st["by_provider"].items()) or "—")
+        _kv("House-Base", r["house_base"])
+        _kv("Eigenes trainiert", "ja v%d" % r["house_version"] if r["house_trained"] else "nein")
+        _kv("Trainings-Deps fehlen", ", ".join(r["deps_missing"]) or "keine")
+        _kv("Bereit zum Training", "ja" if r["ready"] else "nein (mehr Daten sammeln)")
+        print()
+        return 0
+    if args.train_action == "export":
+        n = export_chatml(args.path, teacher_only=args.teacher_only)
+        print(f"{n} Beispiele exportiert → {args.path}")
+        return 0
+    # run
+    from pathlib import Path
+    rep = train(repo_root=Path(os.getcwd()) / "training")
+    _header("Training")
+    if rep["action"] == "skipped":
+        print(_c(rep["reason"], _YELLOW))
+    elif rep["action"] == "script_generated":
+        print(f"Datensatz exportiert: {rep['exported']['lines']} Zeilen → {rep['exported']['path']}")
+        print(f"Trainings-Skript erzeugt: {rep['script']}")
+        print(_c("\nNächster Schritt (GPU empfohlen):", _BOLD))
+        print(f"  {rep['instructions']}")
+    elif rep["action"] == "trained":
+        print(_c(f"✓ Eigenes Modell trainiert (v{rep['house_version']}).", _GREEN))
+    else:
+        print(_c(f"Fehler: {rep.get('error','?')}", _RED))
+    return 0
 
 
 def cmd_ask(args: argparse.Namespace) -> int:
