@@ -1,0 +1,1 @@
+"""Provider-Adapter (lokal + Cloud)."""

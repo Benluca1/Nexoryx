@@ -29,3 +29,10 @@ models/
 # OS
 .DS_Store
 Thumbs.db
+
+# Interne Entwickler-/Planungsdateien — nicht ins öffentliche Repo
+plan.txt
+CLAUDE.md
+.claude/
+# Sync-Skript enthält Token-Logik / lokal — nicht pushen
+sync.sh

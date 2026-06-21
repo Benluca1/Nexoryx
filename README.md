@@ -50,9 +50,38 @@ ist Nexoryx per Chat fernsteuerbar (`/ask`, `/run`, `/status`, …).
 
 ## Status
 
-Frühe Entwicklung. Lauffähig sind aktuell: Hardware-Erkennung, Profil-Auswahl,
-`nexoryx doctor` und das Rollen-/Admin-Gating. Router, Modelle, Agenten, Daemon
-und Telegram folgen gemäß Entwicklungsplan.
+Lauffähig (zero-dependency-Kern, Cloud/Inferenz als optionale Extras):
+- **Plattform:** Hardware-Erkennung + Profil + Modell-Gates (`nexoryx doctor`)
+- **Rollen/Admin-Gating:** Admin nur via Server-Install (`192.168.13.100`)
+- **Router + Brain:** `nexoryx ask` — Task-Klassifikation + Score-Router über
+  lokal (Ollama) und Cloud (Anthropic/OpenAI/Gemini), Fallback-Kette
+- **Memory:** `nexoryx memory` — SQLite-Multi-Layer + Recall/Forget
+- **Multi-Agent:** `nexoryx run` — Planner + spezialisierte Agenten + Message Bus
+- **Tools/Sandbox:** `nexoryx exec` — Terminal in Sandbox, Security-Veto,
+  Permission-Gate, Audit-Log
+- **Daemon:** `nexoryx daemon` — HTTP-API (`/status`, `/ask`)
+- **Telegram:** `nexoryx telegram` — Bot mit Befehlen + Auth/Rollen
+- **Admin:** `nexoryx admin keys|telegram|user|audit|memory|pair|profile|budget`
+
+Kompetitiver Feature-Superset (was ein moderner Agenten-Assistent können muss):
+- **Agentic Tool-Use (ReAct):** `nexoryx run --auto` — das Modell wählt Tools
+  autonom, der Loop führt sie abgesichert aus (Security-Veto + Permission + Audit)
+- **Tools:** terminal, fs_read/fs_write, http_fetch, web_search, glob, grep, git
+- **Streaming + Multi-Turn:** `nexoryx chat` (interaktiv) und `ask --stream`
+- **Usage-/Kosten-Tracking + Budget-Guard:** `nexoryx usage`, `admin budget`
+  (Downrouting auf lokal bei überschrittenem Tages-Cap)
+- **Config + Personas:** `nexoryx config get|set`, globaler System-Prompt
+- **Plugins:** `~/.nexoryx/plugins/*.py` registrieren eigene Tools automatisch
+- **Daemon-API** als gemeinsamer Kern für CLI/Telegram/Web
+
+> Hinweis: „OpenClaw"/„Hermes" sind hier nicht 1:1 nachgebaut — ihre exakten
+> Feature-Listen sind nicht verlässlich dokumentiert. Implementiert ist der
+> übliche Funktions-Superset solcher Assistenten plus Nexoryx-eigene Punkte
+> (HW-adaptives Profil, Tiny-Control-Brain-Routing, Security-Agent-Veto,
+> Graceful-Degradation, ein Logik-Kern für drei Frontends).
+
+Offen (größere eigene Vorhaben): eigenes Modell-Training (Tiny/Mini/Large),
+Vektor-Memory (sqlite-vec), Browser-/Docker-Tools, Telegram-Inline-Approve.
 
 ## Lizenz
 

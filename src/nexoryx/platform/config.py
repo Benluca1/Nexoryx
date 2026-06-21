@@ -31,6 +31,8 @@ class Config:
     profile: str = "balanced"
     telegram_admin_id: str = ""
     telegram_allowlist: dict[str, str] = field(default_factory=dict)  # id -> role
+    daily_budget: float = 0.0  # USD/Tag Cloud-Cap (0 = unbegrenzt)
+    persona: str = ""          # optionaler globaler System-Prompt-Zusatz
     version: str = "0.0.1"
 
     def is_admin(self) -> bool:
@@ -63,6 +65,42 @@ def save(cfg: Config) -> None:
         os.chmod(CONFIG_PATH, 0o600)
     except OSError:
         pass
+
+
+def load_secrets() -> dict[str, str]:
+    """Secrets aus ~/.nexoryx/secrets lesen (KEY=VALUE-Zeilen)."""
+    out: dict[str, str] = {}
+    if not SECRETS_PATH.exists():
+        return out
+    try:
+        for line in SECRETS_PATH.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            out[k.strip()] = v.strip()
+    except OSError:
+        pass
+    return out
+
+
+def set_secret(key: str, value: str) -> None:
+    """Ein Secret setzen/aktualisieren (Datei mit chmod 600)."""
+    ensure_dir()
+    secrets = load_secrets()
+    secrets[key] = value
+    SECRETS_PATH.write_text(
+        "".join(f"{k}={v}\n" for k, v in secrets.items()), encoding="utf-8"
+    )
+    try:
+        os.chmod(SECRETS_PATH, 0o600)
+    except OSError:
+        pass
+
+
+def get_key(name: str) -> str:
+    """API-Key aus Umgebung (Vorrang) oder Secrets-Datei holen. Leer = fehlt."""
+    return os.environ.get(name, "") or load_secrets().get(name, "")
 
 
 def resolve_role(admin_enable_token: str | None, source: str) -> str:
