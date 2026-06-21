@@ -33,6 +33,10 @@ class Config:
     telegram_allowlist: dict[str, str] = field(default_factory=dict)  # id -> role
     daily_budget: float = 0.0  # USD/Tag Cloud-Cap (0 = unbegrenzt)
     persona: str = ""          # optionaler globaler System-Prompt-Zusatz
+    learn: bool = True         # Flywheel: jede Antwort als Trainingsdatum erfassen
+    house_base: str = ""       # hardware-gewähltes Start-Modell (Ollama-Tag)
+    house_trained: bool = False  # eigenes Modell schon trainiert?
+    house_version: int = 0
     version: str = "0.0.1"
 
     def is_admin(self) -> bool:
