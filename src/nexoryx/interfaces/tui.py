@@ -55,7 +55,7 @@ _MASCOT = [
 
 _SLASH = [
     "/help", "/clear", "/doctor", "/models", "/usage",
-    "/memory", "/private", "/update", "/personality", "/exit", "/quit",
+    "/memory", "/private", "/update", "/personality", "/settings", "/exit", "/quit",
 ]
 
 _HELP_MD = """\
@@ -73,13 +73,14 @@ Einfach schreiben — Nexoryx erledigt es direkt.
 | Befehl | Wirkung |
 |---|---|
 | `/help` | Diese Hilfe |
-| `/clear` | Bildschirm leeren |
-| `/doctor` | Hardware + Profil prüfen |
-| `/models` | Modelle anzeigen |
-| `/usage` | Cloud-Verbrauch |
+| `/settings` | API-Keys & Einstellungen verwalten |
+| `/personality` | Persönlichkeit wechseln / erstellen |
+| `/clear` | Chat leeren |
+| `/private` | Privat-Modus (nur lokal) |
 | `/memory` | Letzte Erinnerungen |
-| `/private` | Privat-Modus (nur lokale Modelle) |
-| `/update` | Neueste Version installieren |
+| `/doctor` | Hardware + Profil prüfen |
+| `/models` | Verfügbare Modelle |
+| `/update` | Auf neuste Version aktualisieren |
 | `/exit` | Beenden |
 """
 
@@ -111,6 +112,7 @@ def run() -> int:
         return _run_plain(router, mem, cfg, profile)
 
     console = Console()
+    _msg_counter = [0]  # mutable für Closure
     _banner(console, profile, fc_model, current_personality)
 
     history: list[str] = []
@@ -203,6 +205,10 @@ def run() -> int:
             elif cmd == "/update":
                 console.print()
                 _do_update(console)
+
+            elif cmd == "/settings":
+                console.print()
+                _cmd_settings(console)
 
             elif cmd == "/personality":
                 parts_cmd = user.split(maxsplit=2)
@@ -340,7 +346,9 @@ def run() -> int:
             continue
 
         n = len(steps)
-        label = f"{fc_model or 'chat'}" + (f" · {n} Schritt{'e' if n != 1 else ''}" if n else "")
+        _msg_counter[0] += 1
+        step_txt = f" · {n} Schritt{'e' if n != 1 else ''}" if n else ""
+        label = f"{fc_model or 'chat'}{step_txt} · #{_msg_counter[0]}"
         _print_bot(console, answer, label=label)
         history.extend([f"User: {user}", f"Nexoryx: {answer[:300]}"])
         mem.remember(f"Chat: {user} → {answer[:200]}", scope="long")
@@ -419,38 +427,57 @@ def _banner(console: "Console", profile, fc_model: str | None = None,
     console.print()
 
 
+def _ts() -> str:
+    from datetime import datetime
+    return datetime.now().strftime("%H:%M")
+
+
 def _print_user(console: "Console", text: str) -> None:
-    """Nutzereingabe — rechts ausgerichtet, Slate-Farbe."""
-    console.print()
-    label = Text(" Du ", style=f"bold {_SLATE}")
-    body  = Text(text, overflow="fold", style="white")
+    """Nutzereingabe — Chat-Bubble rechts, passt sich der Textlänge an."""
+    ts = _ts()
+    lines = text.split("\n")
+    max_len = max(len(l) for l in lines) if lines else len(text)
+    bubble_w = min(max_len + 10, int(console.width * 0.72), console.width - 4)
+
+    body = Text(text, overflow="fold", style="bold white")
     p = Panel(
         body,
-        title=f"[bold {_SLATE}]● Du[/bold {_SLATE}]",
-        title_align="right",
-        border_style=_SLATE_DIM,
+        border_style=_SLATE,
         box=box.ROUNDED,
         padding=(0, 2),
+        width=bubble_w,
     )
-    console.print(Align.right(p, width=min(console.width - 2, console.width)))
+    footer = Text()
+    footer.append(f"Du  ", style=f"bold {_SLATE_DIM}")
+    footer.append(ts, style=f"dim {_SLATE_DIM}")
+
+    console.print()
+    console.print(Align.right(p))
+    console.print(Align.right(footer))
 
 
 def _bot_panel(content: str, label: str, done: bool) -> "Panel":
-    border  = _AMBER if done else _AMBER_DIM
+    ts = _ts()
+    border = _AMBER if done else _AMBER_DIM
+
     title_t = Text()
-    title_t.append("◆ NEXO", style=f"bold {_AMBER_HI}")
-    title_t.append("RYX", style=f"bold {_AMBER}")
+    title_t.append(" ◆ ", style=f"bold {_AMBER_HI}")
+    title_t.append("NEXO", style=f"bold {_AMBER_HI}")
+    title_t.append("RYX ", style=f"bold {_AMBER}")
     if not done:
-        title_t.append(" ●", style=f"dim {_AMBER_DIM}")
-    title_t.append(f"  {label}", style="dim")
-    body = Markdown(content) if content.strip() else Text("…", style="dim")
+        title_t.append("● ", style=f"dim {_AMBER_DIM}")
+
+    body = Markdown(content) if (done and content.strip()) else Text(content or "…", style="dim")
     return Panel(body, title=title_t, title_align="left",
+                 subtitle=f"[dim {_AMBER_DIM}]{label}  {ts}[/dim {_AMBER_DIM}]",
+                 subtitle_align="right",
                  border_style=border, box=box.HEAVY_HEAD, padding=(1, 2))
 
 
 def _print_bot(console: "Console", content: str, label: str) -> None:
     console.print()
     console.print(_bot_panel(content, label=label, done=True))
+    console.print(Rule(style=_AMBER_DIM))
 
 
 # ── Persönlichkeits-Befehle ───────────────────────────────────────────────────
@@ -565,30 +592,125 @@ def _on_exit(console: "Console", history: list[str]) -> None:
 # ── Update-Helfer ─────────────────────────────────────────────────────────────
 
 def _do_update(console: "Console") -> None:
+    import os
     import subprocess
+    import time
     from pathlib import Path
     repo = Path(__file__).resolve().parents[3]
-    console.print(f"  [dim]Repo: {repo}[/dim]")
-    with console.status(f"  [{_AMBER_DIM}]git pull …[/{_AMBER_DIM}]",
-                        spinner="arc", spinner_style=_AMBER):
+    with console.status(
+        f"[bold {_AMBER}]◆[/bold {_AMBER}]  [{_AMBER_DIM}]Lade Update …[/{_AMBER_DIM}]",
+        spinner="dots2", spinner_style=_AMBER_HI,
+    ):
         pull = subprocess.run(["git", "pull", "--ff-only"],
                               cwd=repo, capture_output=True, text=True)
     if pull.returncode != 0:
-        console.print(f"  [red]git pull fehlgeschlagen:[/red]\n{pull.stderr.strip()}")
+        console.print(Panel(
+            Text(pull.stderr.strip() or "Unbekannter Fehler", style="red"),
+            title=f"[red]✗ git pull fehlgeschlagen[/red]",
+            border_style="red", box=box.ROUNDED, padding=(0, 2),
+        ))
         return
     msg = pull.stdout.strip()
     if "Already up to date" in msg or "Bereits aktuell" in msg:
-        console.print(f"  [{_AMBER_DIM}]Bereits aktuell.[/{_AMBER_DIM}]")
+        console.print(f"\n  [{_AMBER_DIM}]◆  Bereits aktuell.[/{_AMBER_DIM}]\n")
         return
-    console.print(f"  [green]✓[/green] {msg}")
-    with console.status(f"  [{_AMBER_DIM}]pip install …[/{_AMBER_DIM}]",
-                        spinner="arc", spinner_style=_AMBER):
+    console.print(f"\n  [bold {_GREEN}]✓[/bold {_GREEN}]  {msg}")
+    with console.status(
+        f"[bold {_AMBER}]◆[/bold {_AMBER}]  [{_AMBER_DIM}]Installiere …[/{_AMBER_DIM}]",
+        spinner="dots2", spinner_style=_AMBER_HI,
+    ):
         pip = subprocess.run([sys.executable, "-m", "pip", "install", "-e", ".", "-q"],
                              cwd=repo, capture_output=True, text=True)
-    if pip.returncode == 0:
-        console.print(f"  [green]✓[/green] Update fertig — [bold {_AMBER}]nex[/bold {_AMBER}] neu starten.")
-    else:
+    if pip.returncode != 0:
         console.print(f"  [red]pip fehlgeschlagen:[/red]\n{pip.stderr.strip()}")
+        return
+    console.print(f"  [bold {_GREEN}]✓[/bold {_GREEN}]  Update installiert — starte neu …\n")
+    time.sleep(0.8)
+    # Prozess in-place neustarten (kein manueller Restart nötig)
+    os.execv(sys.executable, [sys.executable] + sys.argv)
+
+
+# ── Settings ──────────────────────────────────────────────────────────────────
+
+_SETTINGS_KEYS = [
+    ("anthropic",  "ANTHROPIC_API_KEY",   "Anthropic Claude"),
+    ("openai",     "OPENAI_API_KEY",       "OpenAI GPT-4o"),
+    ("gemini",     "GEMINI_API_KEY",       "Google Gemini"),
+    ("telegram",   "TELEGRAM_BOT_TOKEN",  "Telegram Bot-Token"),
+    ("github",     "GITHUB_PAT",           "GitHub PAT (Training-Upload)"),
+]
+
+
+def _cmd_settings(console: "Console") -> None:
+    """Interaktive Einstellungen — API-Keys verwalten."""
+    from ..platform import config as cfg_mod
+    import getpass
+
+    while True:
+        # Status-Tabelle
+        rows = Text()
+        for i, (slug, env, label) in enumerate(_SETTINGS_KEYS, 1):
+            val = cfg_mod.get_key(env) or ""
+            if val:
+                masked = val[:4] + "●●●●" + val[-2:] if len(val) > 6 else "●●●●"
+                status = Text()
+                status.append(f"  [{i}]  ", style=f"bold {_AMBER}")
+                status.append(f"{label:<28}", style="white")
+                status.append(masked, style=f"{_GREEN}")
+            else:
+                status = Text()
+                status.append(f"  [{i}]  ", style="dim")
+                status.append(f"{label:<28}", style="dim")
+                status.append("nicht gesetzt", style="dim red")
+            rows.append_text(status)
+            rows.append("\n")
+
+        console.print(Panel(
+            rows,
+            title=f"[bold {_AMBER}]◆  Einstellungen[/bold {_AMBER}]",
+            title_align="left",
+            subtitle=f"[dim {_AMBER_DIM}]Nummer = Key setzen  ·  d = löschen  ·  Enter = fertig[/dim {_AMBER_DIM}]",
+            border_style=_AMBER_DIM,
+            box=box.HEAVY_HEAD,
+            padding=(0, 1),
+        ))
+
+        try:
+            choice = console.input(f"  [{_AMBER}]▸[/{_AMBER}]  ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            break
+
+        if not choice or choice in ("q", "exit", "fertig"):
+            break
+
+        # Löschen: "d1" oder "d anthropic"
+        if choice.startswith("d"):
+            target = choice[1:].strip()
+            for i, (slug, env, label) in enumerate(_SETTINGS_KEYS, 1):
+                if target == str(i) or target == slug:
+                    cfg_mod.set_secret(env, "")
+                    console.print(f"  [dim]✗  {label} gelöscht.[/dim]")
+            continue
+
+        # Nummer eingegeben
+        try:
+            idx = int(choice) - 1
+            slug, env, label = _SETTINGS_KEYS[idx]
+        except (ValueError, IndexError):
+            console.print(f"  [dim]Ungültige Eingabe.[/dim]")
+            continue
+
+        console.print(f"\n  [{_AMBER}]{label}[/{_AMBER}]")
+        console.print(f"  [dim]Neuen Key eingeben (Enter = abbrechen):[/dim]")
+        try:
+            new_val = getpass.getpass("  ").strip()
+        except (EOFError, KeyboardInterrupt):
+            continue
+        if new_val:
+            cfg_mod.set_secret(env, new_val)
+            console.print(f"  [bold {_GREEN}]✓[/bold {_GREEN}]  {label} gespeichert.\n")
+        else:
+            console.print(f"  [dim]Abgebrochen.[/dim]\n")
 
 
 # ── Fallback ohne Rich ────────────────────────────────────────────────────────
