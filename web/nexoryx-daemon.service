@@ -1,0 +1,16 @@
+[Unit]
+Description=Nexoryx Daemon (API + Telegram-Bot)
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=__NEXORYXD_BIN__ --host 0.0.0.0 --port 3008
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:%h/.nexoryx/daemon.log
+StandardError=append:%h/.nexoryx/daemon.log
+Environment=HOME=%h
+
+[Install]
+WantedBy=default.target

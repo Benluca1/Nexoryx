@@ -152,6 +152,17 @@ def serve(host: str = "127.0.0.1", port: int = 3008) -> None:
     except Exception:
         pass
 
+    # Telegram-Bot automatisch im Hintergrund starten (kein manueller Befehl nötig)
+    try:
+        from ..interfaces.telegram.bot import start_background as _tg_start
+        tg_thread = _tg_start()
+        if tg_thread:
+            print("Telegram-Bot: gestartet (Hintergrund-Thread)")
+        else:
+            print("Telegram-Bot: kein Token — übersprungen (nexoryx admin telegram)")
+    except Exception as exc:
+        print(f"Telegram-Bot: Fehler beim Start — {exc}")
+
     handler = _build_handler()
     httpd = ThreadingHTTPServer((host, port), handler)
     print(f"nexoryxd läuft auf http://{host}:{port}  (Ctrl-C zum Beenden)")

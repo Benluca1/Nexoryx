@@ -340,6 +340,57 @@ def _banner() -> None:
     print()
 
 
+# ── Systemd-Service ───────────────────────────────────────────────────────────
+
+def _install_systemd_service() -> None:
+    """Installiert nexoryx-daemon.service als systemd-User-Service (Linux only).
+
+    - Ersetzt __NEXORYXD_BIN__ durch den echten Pfad
+    - Aktiviert + startet den Service (nexoryxd + Telegram-Bot laufen beim Booten)
+    - Idempotent: läuft mehrfach sicher
+    """
+    if sys.platform != "linux":
+        return
+    if not shutil.which("systemctl"):
+        return
+
+    nexoryxd = shutil.which("nexoryxd") or str(Path(sys.executable).parent / "nexoryxd")
+    if not Path(nexoryxd).exists():
+        _warn(f"nexoryxd nicht gefunden ({nexoryxd}) — Service-Install übersprungen")
+        return
+
+    service_src = _REPO_ROOT / "web" / "nexoryx-daemon.service"
+    if not service_src.exists():
+        _warn("web/nexoryx-daemon.service nicht gefunden — übersprungen")
+        return
+
+    sd_dir = Path.home() / ".config" / "systemd" / "user"
+    sd_dir.mkdir(parents=True, exist_ok=True)
+    sd_file = sd_dir / "nexoryx-daemon.service"
+
+    content = service_src.read_text(encoding="utf-8").replace("__NEXORYXD_BIN__", nexoryxd)
+    sd_file.write_text(content, encoding="utf-8")
+
+    print(f"\n  {_B}Systemd-Service{_RST}")
+    for cmd in [
+        ["systemctl", "--user", "daemon-reload"],
+        ["systemctl", "--user", "enable", "nexoryx-daemon"],
+        ["systemctl", "--user", "restart", "nexoryx-daemon"],
+    ]:
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+            if r.returncode != 0 and "restart" in cmd:
+                # start statt restart wenn noch nicht lief
+                subprocess.run(
+                    ["systemctl", "--user", "start", "nexoryx-daemon"],
+                    capture_output=True, timeout=10,
+                )
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+    _ok("nexoryx-daemon.service aktiviert (nexoryxd + Telegram-Bot starten beim Booten)")
+    _ok(f"Log: ~/.nexoryx/daemon.log  ·  Status: systemctl --user status nexoryx-daemon")
+
+
 # ── Hauptprogramm ──────────────────────────────────────────────────────────────
 
 def main() -> int:
@@ -503,7 +554,10 @@ def main() -> int:
         cfg.house_base = rec_tag
     cfg_mod.save(cfg)
 
-    # 7) PATH in Shell-Config eintragen (idempotent, nur wenn nötig)
+    # 7) Systemd-User-Service installieren + aktivieren (Linux only)
+    _install_systemd_service()
+
+    # 8) PATH in Shell-Config eintragen (idempotent, nur wenn nötig)
     venv_bin = Path(sys.executable).parent
     path_line = f'export PATH="{venv_bin}:$PATH"'
     path_added = False
@@ -514,7 +568,7 @@ def main() -> int:
             _ok(f"PATH in {rc.name} eingetragen")
             path_added = True
 
-    # 8) Abschluss
+    # 9) Abschluss
     print()
     _rule("━")
     msg = "Nexoryx ist bereit!"
