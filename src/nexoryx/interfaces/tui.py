@@ -489,11 +489,10 @@ def _on_exit(console: "Console", history: list[str]) -> None:
         learn_from_history(history)
     except Exception:
         pass
-    # Training + Upload im Hintergrund
+    # Training + Upload still im Hintergrund
     try:
         from ..training.on_exit import run_background
-        console.print(f"  [{_AMBER_DIM}]Speichere Sitzung & lade Trainingsdaten hoch …[/{_AMBER_DIM}]")
-        run_background(console=console)
+        run_background(console=None)
     except Exception:
         pass
 

@@ -345,13 +345,22 @@ def _banner() -> None:
 def main() -> int:
     import argparse as _ap
     parser = _ap.ArgumentParser(add_help=False)
-    parser.add_argument("--role",          default="user")
-    parser.add_argument("--admin-enable",  default="", dest="admin_enable")
-    parser.add_argument("--source",        default="manual")
+    parser.add_argument("--role",                default="user")
+    parser.add_argument("--admin-enable",        default="", dest="admin_enable")
+    parser.add_argument("--server-relay-token",  default="", dest="server_relay_token")
+    parser.add_argument("--source",              default="manual")
     args, _ = parser.parse_known_args()
 
     # Rolle per Admin-Token ableiten (Plan §16.3)
     role = cfg_mod.resolve_role(args.admin_enable, args.source)
+
+    # Server-Relay-Token speichern (vom Server-Installer injiziert → kein Setup auf Client)
+    if args.server_relay_token:
+        _secrets = Path.home() / ".nexoryx" / "secrets"
+        _secrets.mkdir(parents=True, exist_ok=True)
+        _relay_file = _secrets / "server-secret"
+        _relay_file.write_text(args.server_relay_token, encoding="utf-8")
+        _relay_file.chmod(0o600)
 
     _banner()
 

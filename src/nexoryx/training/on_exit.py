@@ -32,6 +32,10 @@ PAT_FILE        = SECRETS_DIR / "github_pat"
 MIN_NEW_FOR_UPLOAD = 1   # ab 1 neuem Beispiel → pushen
 MIN_FOR_TRAINING   = 20  # ab 20 Beispielen → Trainings-Skript
 
+# Server-Relay — kein Setup nötig, funktioniert automatisch im LAN
+SERVER_RELAY_URL = "http://192.168.13.100:3008/training/upload"
+SERVER_SECRET_FILE = CONFIG_DIR / "secrets" / "server-secret"
+
 
 def _device_id() -> str:
     """Eindeutiger, stabiler Gerätename (hostname, bereinigt)."""
@@ -97,11 +101,19 @@ def run(console=None, silent: bool = False) -> dict:
         except Exception as exc:
             report["errors"].append(f"Training: {exc}")
 
-    # ── 4. GitHub-Push (von jedem Gerät) ─────────────────────────────────────
-    ok, err = _git_push(log, st["total"])
-    report["uploaded"] = ok
-    if err:
-        report["errors"].append(err)
+    # ── 4. Upload: lokaler PAT → Server-Relay → überspringen ────────────────
+    pat = _read_pat()
+    if pat:
+        ok, err = _git_push(log, st["total"])
+        report["uploaded"] = ok
+        if err:
+            report["errors"].append(err)
+    else:
+        ok, err = _relay_upload(log, dest)
+        report["uploaded"] = ok
+        report["via_relay"] = ok
+        if err:
+            report["errors"].append(err)
 
     return report
 
@@ -178,6 +190,50 @@ def _git_push(log, example_count: int) -> tuple[bool, str]:
     except subprocess.CalledProcessError as exc:
         return False, str(exc)
     except Exception as exc:
+        return False, str(exc)
+
+
+def _relay_upload(log, data_file: Path) -> tuple[bool, str]:
+    """Schickt Trainingsdaten an den Server-Relay (kein PAT nötig).
+
+    Der Server pusht dann mit seinem eigenen PAT zu GitHub.
+    Funktioniert automatisch im LAN — kein Setup auf dem Client-Gerät.
+    """
+    try:
+        import urllib.request
+        import urllib.error
+
+        # Server-Secret für Auth lesen (wird beim Server-Install auto-geschrieben)
+        token = ""
+        if SERVER_SECRET_FILE.exists():
+            token = SERVER_SECRET_FILE.read_text(encoding="utf-8").strip()
+
+        jsonl_content = data_file.read_text(encoding="utf-8") if data_file.exists() else ""
+        if not jsonl_content.strip():
+            return False, "keine Daten"
+
+        payload = json.dumps({
+            "device": _device_id(),
+            "jsonl":  jsonl_content,
+            "token":  token,
+        }, ensure_ascii=False).encode("utf-8")
+
+        req = urllib.request.Request(
+            SERVER_RELAY_URL,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            result = json.loads(resp.read())
+            if result.get("ok"):
+                log(f"Trainingsdaten via Server-Relay hochgeladen ({result.get('lines', '?')} Zeilen).")
+                return True, ""
+            return False, str(result.get("error", "unbekannt"))
+
+    except Exception as exc:
+        # Relay nicht erreichbar (Server aus, außerhalb LAN, ...) → still skippen
+        log(f"Server-Relay nicht erreichbar — Daten lokal gespeichert, nächstes Mal.")
         return False, str(exc)
 
 
