@@ -122,6 +122,7 @@ def run_fc(
     on_step: Callable | None = None,
     max_steps: int = 10,
     model: str | None = None,
+    personality: dict | None = None,
 ) -> tuple[str, list[str]]:
     """Function-Calling Agentic Loop.
 
@@ -139,11 +140,27 @@ def run_fc(
     client = OpenAI(base_url=_OLLAMA_BASE, api_key="ollama")
 
     home = os.path.expanduser("~")
+
+    # Persona-Kontext laden
+    try:
+        from ..memory.persona import get_context as _persona_ctx
+        persona = _persona_ctx()
+    except Exception:
+        persona = ""
+
+    if personality and personality.get("system_prompt"):
+        base_system = personality["system_prompt"]
+    else:
+        base_system = (
+            "Du bist Nexoryx, ein KI-Assistent der den PC des Nutzers direkt steuert. "
+            "Antworte auf Deutsch. Bestätige kurz was du getan hast."
+        )
+
     system = (
-        f"Du bist Nexoryx, ein KI-Assistent der den PC des Nutzers direkt steuert.\n"
+        f"{base_system}\n"
         f"Home-Verzeichnis: {home}\n"
-        "Nutze die verfügbaren Tools um Aufgaben zu erledigen.\n"
-        "Antworte immer auf Deutsch. Bestätige kurz was du getan hast."
+        + (f"\n{persona}\n" if persona else "")
+        + "Nutze die verfügbaren Tools um Aufgaben direkt auszuführen."
     )
 
     messages: list[dict] = [
@@ -163,7 +180,18 @@ def run_fc(
 
         # Kein Tool-Call → fertig
         if not msg.tool_calls:
-            return (msg.content or "Erledigt.").strip(), steps
+            answer = (msg.content or "Erledigt.").strip()
+            # Trainingsdaten aufzeichnen
+            try:
+                from ..training.dataset import record_interaction
+                record_interaction(
+                    prompt=task, system=system, response=answer,
+                    provider="ollama", model=fc_model,
+                    task_type="chat", is_local=True,
+                )
+            except Exception:
+                pass
+            return answer, steps
 
         messages.append({"role": "assistant",
                          "content": msg.content or "",

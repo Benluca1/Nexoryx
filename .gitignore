@@ -26,6 +26,11 @@ models/
 *.sqlite
 *.db
 
+# Trainingsdaten: JSONL und .md sind erlaubt (Trainings-Signal)
+# Nur Modell-Gewichte ausschließen
+training/data/*.pt
+training/finetune_house.py
+
 # OS
 .DS_Store
 Thumbs.db

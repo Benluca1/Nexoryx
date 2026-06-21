@@ -11,11 +11,11 @@ from dataclasses import dataclass
 
 from .detect import Hardware
 
-# Modell-Schwellen (siehe Plan §3). vram ODER ram erfüllt → erlaubt.
+# Modell-Schwellen (vram ODER ram erfüllt → erlaubt).
 MODEL_REQUIREMENTS = {
-    "nexoryx-tiny": {"min_ram_mb": 0, "min_vram_mb": 0},
-    "nexoryx-mini": {"min_ram_mb": 8_000, "min_vram_mb": 6_000},
-    "nexoryx-large": {"min_ram_mb": 48_000, "min_vram_mb": 24_000},
+    "tinynex":  {"min_ram_mb": 0,      "min_vram_mb": 0},      # läuft überall
+    "nex":      {"min_ram_mb": 8_000,  "min_vram_mb": 6_000},  # Mittelklasse
+    "largenex": {"min_ram_mb": 48_000, "min_vram_mb": 24_000}, # High-End
 }
 
 
