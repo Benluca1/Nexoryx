@@ -1,0 +1,601 @@
+# Nexoryx — Systemarchitektur & Bauplan (0 → 1)
+
+## Context
+
+Ziel ist ein **hochmodulares, lokal + cloudfähiges Multi-Agenten-Framework** namens **Nexoryx**, das auf sehr schwacher Hardware (alte Laptops, CPU-only) läuft, sich selbst an die Hardware anpasst, automatisch das beste Modell (lokal/Cloud) wählt, ein eigenes winziges "Control-Brain"-Modell besitzt, extrem viel User-Kontext personalisiert speichert, per Install-Skript installierbar ist und vollständig über Telegram fernsteuerbar ist.
+
+Das Verzeichnis `/home/ben/projects/Nexoryx` ist leer → Greenfield. Dieser Plan ist gleichzeitig **Architektur-Dokument** und **ausführbarer Bauplan**.
+
+**Getroffene Entscheidungen (vom User bestätigt):**
+- Liefern: volle Architektur **und** baubares MVP-Gerüst.
+- Stack: **Python-zentriert** (bestes ML-Ökosystem), TS nur fürs optionale Web-Dashboard.
+- Tiny Model: **From scratch** trainieren — mit Bootstrap über ein bestehendes Tiny-Modell, damit das System sofort lauffähig ist.
+- Cloud: **Anthropic + OpenAI + Google Gemini** im Multi-Provider-Router.
+
+**Leitprinzip:** *Graceful Degradation* — jede Komponente hat einen Fallback nach unten (Cloud → lokal groß → lokal klein → Tiny → Regeln). Nexoryx muss auf einem 4-GB-RAM-CPU-Laptop genauso booten wie auf einer RTX-Workstation, nur mit weniger Fähigkeiten.
+
+---
+
+## 1. Vollständige Systemarchitektur
+
+### 1.1 Schichtenmodell
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ INTERFACES        CLI (nexoryx)   Telegram Bot   Web-Dashboard*    │
+├──────────────────────────────────────────────────────────────────┤
+│ CONTROL PLANE     Tiny Model ("Control Brain")                     │
+│                   ├─ Intent-Klassifikation                         │
+│                   ├─ Routing-Vorentscheidung                       │
+│                   └─ Task-Voranalyse / Agent-Auswahl              │
+├──────────────────────────────────────────────────────────────────┤
+│ ORCHESTRATION     Orchestrator  +  Message Bus (async)             │
+│                   Agents: Planner│Coder│Research│Debug│Tool│       │
+│                           Memory│Security                          │
+├──────────────────────────────────────────────────────────────────┤
+│ MODEL LAYER       Model Router → Provider-Adapter                  │
+│                   local: llama.cpp/Ollama/LM Studio                │
+│                   cloud: Anthropic / OpenAI / Gemini               │
+├──────────────────────────────────────────────────────────────────┤
+│ MEMORY LAYER      Short│Long│Project│Semantic(Vector)│Preference   │
+├──────────────────────────────────────────────────────────────────┤
+│ TOOL LAYER        Terminal│FS│Browser│HTTP│GitHub│Docker          │
+│                   (Permission + Sandbox + Audit)                   │
+├──────────────────────────────────────────────────────────────────┤
+│ PLATFORM          HW-Detector │ Config/Profile │ Telemetry │ Logs  │
+└──────────────────────────────────────────────────────────────────┘
+        * Web-Dashboard = optional, Phase 3 (TypeScript/React)
+```
+
+### 1.2 Kernprinzipien
+- **Single long-running Daemon** (`nexoryxd`) hält Modelle warm; CLI/Telegram/Web sind dünne Clients über lokalen Unix-Socket/HTTP (localhost). Auf Ultra-Lite kann der Daemon auch on-demand starten.
+- **Capability-Profile statt harter Modi**: Der HW-Detector erzeugt ein `profile.yaml`, das jede Schicht liest (welche Modelle, wie viel Parallelität, welche Tools erlaubt).
+- **Alles ist ein Plugin**: Provider, Tools, Agenten, Memory-Backends laden über ein Entry-Point-Registry (`importlib.metadata` / eigenes Registry). Erweiterbar ohne Core-Änderung.
+- **Event-getrieben**: interner async Message Bus; jede Aktion erzeugt Events (für Telegram-Notifications, Audit-Log, Telemetrie).
+
+### 1.3 Hauptkomponenten (Python-Pakete)
+| Paket | Verantwortung |
+|---|---|
+| `nexoryx.platform` | HW-Detection, Profil, Config, Logging, Telemetrie |
+| `nexoryx.brain` | Tiny-Model-Inferenz, Intent, Routing-Vorentscheidung |
+| `nexoryx.router` | Model Router + Provider-Adapter |
+| `nexoryx.orchestrator` | Agent-Lifecycle, Message Bus, Task-Graph |
+| `nexoryx.agents` | konkrete Agenten |
+| `nexoryx.memory` | Multi-Layer Memory |
+| `nexoryx.tools` | Tool-Implementierungen + Sandbox + Permissions |
+| `nexoryx.interfaces.cli` | `nexoryx` CLI (Typer) |
+| `nexoryx.interfaces.telegram` | Telegram Bot |
+| `nexoryx.daemon` | `nexoryxd` FastAPI/asyncio Server |
+
+---
+
+## 2. Model Router Design
+
+### 2.1 Pipeline
+```
+Request → Tiny Model (Vorklassifikation) → Router-Policy → Provider-Adapter → Antwort
+                                              ↑
+                              Profil + Kosten + Latenz + Verfügbarkeit
+```
+
+### 2.2 Routing-Entscheidung (gewichtete Score-Funktion)
+Jedes verfügbare Modell bekommt einen Score pro Request:
+```
+score(model) =  w_quality   · quality_fit(task_type, model)
+              + w_speed     · speed_fit(latency_req, model, hw)
+              + w_cost      · cost_fit(model)          (lokal = 0 Kosten)
+              + w_context   · context_fit(ctx_size, model.max_ctx)
+              + w_privacy   · privacy_fit(task.sensitive, model.is_local)
+              − penalty(unavailable | over_budget | hw_insufficient)
+```
+- Gewichte `w_*` kommen aus dem **Profil** (Ultra-Lite gewichtet `cost`/`speed`/`privacy` hoch; Pro gewichtet `quality` hoch) und können per Task überschrieben werden (z. B. `--quality`).
+- **Capability-Matrix** pro Modell als Metadaten: `{max_ctx, min_ram, needs_gpu, est_tok_s_cpu, est_tok_s_gpu, strengths:[coding,reasoning,...], cost_in/out}`.
+- Modelle, die das HW-Budget sprengen (`min_ram > verfügbar`), werden hart ausgeschlossen → garantiert lauffähig.
+
+### 2.3 Task-Typen → Default-Präferenz
+| Task | Bevorzugt (wenn verfügbar) |
+|---|---|
+| intent/routing/simple chat | **Tiny Model** (lokal) |
+| coding | Claude Sonnet/Opus → lokal 7-14B Coder → Tiny |
+| reasoning | Claude/Gemini/GPT (groß) → lokal 7B → Tiny |
+| research (Tool-Use, Web) | Cloud mit Tool-Use → lokal mit Function-Calling |
+| summarize/extract | günstiges Cloud-klein (Haiku/GPT-mini/Flash) → lokal klein |
+
+### 2.4 Resilienz
+- **Fallback-Kette** je Request: primär → sekundär → lokal → Tiny → deterministische Antwort. Timeout/Fehler/Rate-Limit triggert nächsten Schritt.
+- **Budget-Guard**: täglicher/monatlicher Cloud-Kosten-Cap aus Config; bei Überschreitung erzwungenes Downrouting auf lokal.
+- **Health-Cache**: Provider-Erreichbarkeit + gemessene Latenz/Tok-s werden gecacht und fließen in `speed_fit` zurück (lernt reale Performance der Maschine).
+- **Semantic Cache** (optional): identische/ähnliche Prompts → Antwort aus Vector-Cache (spart Kosten/Latenz).
+
+---
+
+## 3. Nexoryx Eigene Modell-Familie (Tiny + Mini + Large)
+
+> **Realitäts-Check vorab:** Ein Modell „so gut wie Fable 5" *from scratch* zu trainieren ist außerhalb großer Labore nicht machbar (Frontier-Training = zehntausende GPUs, Monate, Billionen Tokens, zweistellige Mio-$). **Nexoryx Large** ist daher ein eigenes, auf Nexoryx spezialisiertes Modell **auf Basis bester offener Gewichte** (Qwen/Llama 32B–70B) via LoRA/Finetune + Distillation, GGUF-quantisiert — das **beste lokale** Modell, nicht ein Fable-5-Klon. Für echte Frontier-Qualität bleibt der **Cloud-Router** der Pfad. Die Modell-Familie ist gestaffelt und wird **hardware-gated** installiert:
+
+| Modell | Basis | Größe | Rolle | Install ab Profil |
+|---|---|---|---|---|
+| **Nexoryx Tiny** | from scratch | ~30–60M (int4) | Control Brain: Intent/Routing | immer (auch ultra_lite) |
+| **Nexoryx Mini** | offene Basis 3–8B + Finetune | Q4/Q5 GGUF | lokales Allzweck-Modell | balanced (≥8 GB RAM) |
+| **Nexoryx Large** | offene Basis 32–70B + Finetune/Distill | Q4 GGUF | bestes lokales Modell, coding/reasoning | pro (≥24 GB VRAM **oder** ≥48 GB RAM) |
+
+**Hardware-Gate (Installer + Router):** `profile.py` prüft VRAM/RAM gegen `min_ram`/`min_vram` jedes Modells. Nexoryx Large wird **nur heruntergeladen/aktiviert**, wenn die Schwelle erreicht ist; sonst überspringt der Installer es und der Router schließt es hart aus (`hw_insufficient`). Auf schwacher Hardware existiert es schlicht nicht → keine Verlangsamung, kein Absturz. Bei späterem Hardware-Upgrade: `nexoryx models pull large` lädt es nach.
+
+### 3a. Nexoryx Tiny Model (Control Brain)
+
+> Vom User gewählt: **from scratch**. Realistisch heißt das: ein **kleines, hochspezialisiertes** Modell, das *nicht* mit Claude konkurriert, sondern eng definierte Steuer-Aufgaben extrem schnell und CPU-only erledigt. Bootstrap mit Fremdmodell, bis das eigene trainiert ist.
+
+### 3.1 Zweck & harte Grenzen
+**Kann:** Intent-Klassifikation, Routing-Vorentscheidung, Slot/Argument-Extraktion, Agent-Auswahl, Memory-Query-Formulierung, sehr kurze Standardantworten, Tool-Auswahl.
+**Kann nicht (bewusst):** lange Reasoning-Ketten, Codegenerierung, Faktenwissen. Dafür delegiert es an den Router.
+
+### 3.2 Architektur (Zielgröße ~30–60M, Obergrenze 300M)
+- **Decoder-only Transformer**, Llama-Style: RoPE, RMSNorm, SwiGLU, GQA.
+- Vorschlag Small-Variante: `d_model=512, layers=8, heads=8 (kv_heads=2), ctx=2048, vocab=32k`.
+- **Tokenizer**: eigener BPE (SentencePiece/`tokenizers`) auf Domänen-Korpus (Befehle, Code-Intents, Tool-Namen) — kleines Vokabular = kleineres Modell.
+- **Multi-Head-Output**: zusätzlich zum LM-Head zwei leichte Klassifikations-Heads (Intent-Label, Agent-Label) → deterministischere Steuerung als reines Sampling.
+- **Quantisierung**: Training fp16/bf16 → Export **GGUF int4 (Q4_K_M) / int8** für llama.cpp. Ziel: < 200 MB on-disk, < 500 MB RAM, > 30 tok/s auf altem CPU.
+
+### 3.3 Trainings-Pipeline
+1. **Datengenerierung (synthetisch + bootstrap):** mit Cloud-Modellen (Claude/GPT/Gemini) zehntausende `(user_utterance → {intent, agent, tool, route_hint, slots})`-Paare erzeugen; reale Nexoryx-Logs später dazumischen (Self-Improvement-Flywheel).
+2. **Pretraining (klein):** Domänen-Korpus (CLI-Doku, Code-Kommandos, Tool-Specs, Dialoge) — nur so viel, dass Sprache/Struktur sitzt. *Kein* allgemeines Web-Pretraining (zu teuer, unnötig).
+3. **Instruction/Task-Finetuning:** auf die synthetischen Steuer-Paare.
+4. **Distillation:** Cloud-Modell als Teacher → Tiny als Student (Logit-/Antwort-Distillation) für bessere Generalisierung.
+5. **Eval:** Intent-Accuracy, Routing-F1, Latenz/RAM auf Referenz-CPU. Gate: Tiny muss Regel-Baseline schlagen, sonst Bootstrap behalten.
+6. **Export & Registry:** GGUF int4/int8 → `models/nexoryx-tiny/`.
+
+**Bootstrap-Pfad (damit MVP nicht blockiert):** bis Eigenmodell fertig ist, übernimmt **`Qwen2.5-0.5B-Instruct` (GGUF Q4)** oder ein Embedding+Regel-Klassifikator dieselbe Rolle hinter demselben `BrainInterface`. Austausch = ein Config-Wert.
+
+### 3.4 Innovation
+- **Geteilter Embedding-Raum** zwischen Tiny-Model und Semantic-Memory: dieselbe Vektor-Repräsentation für Routing *und* Memory-Recall → konsistent + günstig.
+- **Online-Learning-Hook:** korrigierte Routings (User wählt anderes Modell / Agent meldet Fehlroute) werden als neue Trainingsdaten gesammelt → periodisches Re-Finetuning.
+
+### 3b. Nexoryx Large Model (bestes lokales Modell, hardware-gated)
+- **Zweck:** starkes lokales Coding/Reasoning ohne Cloud — für Pro-Hardware und datenschutzkritische Tasks.
+- **Aufbau (realistisch):** beste offene Basis (z. B. Qwen2.5-32B/72B oder Llama-3.3-70B) → **LoRA-Finetune** auf Nexoryx-Tasks (Tool-Use, Agent-Protokolle, User-Stil) + **Distillation** von Cloud-Teachern → Merge → **GGUF Q4_K_M** Export. Kein Pretraining from scratch (unnötig + unbezahlbar).
+- **Limits & Ehrlichkeit:** erreicht **nicht** Fable-5-Frontier-Niveau; Ziel ist „bestes Modell, das *lokal* auf dieser Maschine läuft". Wer Frontier-Qualität braucht → Router schickt automatisch in die Cloud.
+- **Bereitstellung:** als Ollama-/llama.cpp-Modell registriert; nur auf Pro-Profil im Installer-Schritt 6. `min_vram`/`min_ram`-Metadaten verhindern Laden auf zu schwacher HW.
+- **Optionale Mini-Variante:** dasselbe Rezept auf 3–8B-Basis = **Nexoryx Mini** für Balanced-Hardware (Mittelweg zwischen Tiny und Large).
+
+---
+
+## 4. Installer Design (Schritt-für-Schritt)
+
+**Distribution:** `curl -fsSL https://.../install.sh | bash` → lädt einen **Python-Bootstrap** (`bootstrap.py`), der den Rest macht (kein komplexes Logik-in-bash). Lokale Alternative: `pipx install nexoryx`.
+
+### Flow
+```
+1. Vorbedingungen      Python ≥3.11? sonst pyenv/Hinweis. git, curl prüfen.
+2. HW-Analyse          platform.detect():
+                        CPU(Modell,Kerne) · RAM · GPU(NVIDIA/AMD/Intel/None)
+                        · VRAM · OS · freier Speicher
+3. Profil wählen       Score → ultra_lite | balanced | pro  (override möglich)
+4. Isolierte Umgebung  venv unter ~/.nexoryx/venv, Paket installieren
+5. Runtime-Setup       llama.cpp-Wheel (CPU oder CUDA/Metal je GPU) ·
+                        Ollama erkennen/optional installieren
+6. Modelle             profilbasiert lokale Modelle ziehen (mit Platz-/VRAM-Check):
+                        immer:    nexoryx-tiny (oder Bootstrap)
+                        balanced: nexoryx-mini (3–8B GGUF)
+                        pro:      nexoryx-large (32–70B GGUF, nur wenn
+                                  min_vram/min_ram erfüllt — sonst skip)
+7. API-Keys            interaktiv abfragen (Anthropic/OpenAI/Gemini),
+                        in ~/.nexoryx/secrets (chmod 600) speichern
+8. Telegram (optional)  Bot-Token + Admin-User-ID abfragen, Webhook/Polling
+9. Service              systemd --user / launchd / Windows-Task für nexoryxd
+10. Verify             `nexoryx doctor` → Self-Test aller Schichten
+```
+- **Idempotent & re-runnable**, `--profile`, `--no-telegram`, `--offline` Flags.
+- Schreibt `~/.nexoryx/config.yaml` + `profile.yaml`. Nichts global außer dem `nexoryx`-Shim.
+
+---
+
+## 5. Memory System Design
+
+### 5.1 Fünf Layer
+| Layer | Backend | TTL/Scope |
+|---|---|---|
+| Short-Term | In-Memory Ring-Buffer (+SQLite-Spill) | Session |
+| Long-Term | SQLite (`history`, `facts`) | dauerhaft, user-global |
+| Project | SQLite-Namespace pro Projektpfad | pro Projekt isoliert |
+| Semantic | Vector-DB | dauerhaft, queryable |
+| Preference | SQLite Key-Value + gelernte Profile | dauerhaft |
+
+- **Vector-DB-Wahl:** **sqlite-vec** (Default, null Setup, CPU-freundlich, eine Datei) → bei Pro optional **Qdrant/Chroma**. Hinter `VectorStore`-Interface austauschbar.
+- **Embeddings:** lokal via llama.cpp (z. B. `nomic-embed`/`bge-small`) oder Cloud-Embeddings je Profil.
+
+### 5.2 Funktionen
+- **Auto-Ingest:** nach jeder Session extrahiert der Memory-Agent (über Router) Fakten/Präferenzen/wiederkehrende Tasks → schreibt strukturiert in passende Layer.
+- **Retrieval:** hybrid (Vektor-Ähnlichkeit + Keyword + Recency-Decay + Importance-Score). Kontext-Budget-aware (füllt nur so viel, wie das Zielmodell verträgt).
+- **Salience/Decay:** alte, selten genutzte Memories verlieren Gewicht; wichtige (häufig referenziert) werden konsolidiert ("Memory Consolidation" nach Vorbild Schlaf).
+- **Privacy:** sensible Felder verschlüsselt at-rest; `nexoryx memory forget <query>` löscht gezielt.
+
+---
+
+## 6. Multi-Agent Communication System
+
+### 6.1 Message Bus
+- **Intern:** `asyncio`-basierter Pub/Sub mit Topics (`task.*`, `agent.*`, `tool.*`, `notify.*`). MVP: in-process; später optional Redis/NATS für verteilte Agenten.
+- **Message-Schema (Pydantic):** `{id, parent_id, sender, recipient, type(request|response|event), payload, trace_id, ts}`. Voll auditierbar.
+
+### 6.2 Orchestrierung
+- **Orchestrator** baut aus dem Tiny-Model-Intent einen **Task-Graph (DAG)**; Planner-Agent verfeinert ihn.
+- **Agent-Loop (ReAct-Stil):** Plan → Tool/Modell-Call → Observe → Reflect → bis Done/Budget.
+- **Agenten rufen Agenten** über den Bus (`request` an `coder`, wartet auf `response`). Rekursion-Limit + Budget pro Task verhindert Endlosschleifen.
+- **Parallelität profilabhängig:** Ultra-Lite = strikt sequentiell (1 Agent, kleines Modell). Pro = parallele Agenten + Modell-Parallelität.
+
+### 6.3 Agenten
+Planner (Zerlegung), Coder (Code-Gen/Edit), Research (Web/Docs + Tool-Use), Debug (Fehleranalyse, Test-Loop), Tool (Tool-Ausführung als Service), Memory (Ingest/Recall), Security (prüft jede risikoreiche Aktion **vor** Ausführung — Veto-Recht).
+
+---
+
+## 7. Tool System
+
+- **Tool-Interface (Pydantic-Schema → auto JSON-Schema)** für Function-Calling jedes Modells. Tools: Terminal, FileSystem, Browser (Playwright), HTTP/REST, GitHub (gh/API), Docker.
+- **Sicherheit (Defense in Depth):**
+  - **Permission-System:** je Tool/Aktion Stufe `auto | confirm | admin-only`; Konfig pro Profil und pro Telegram-Rolle.
+  - **Sandbox:** Terminal/Code-Exec default in **Docker-Container** (oder `bubblewrap`/`firejail` ohne Docker; Ultra-Lite: eingeschränkter Subprozess mit cwd-Jail + Ressourcenlimits).
+  - **FS-Jail:** Schreibzugriff nur unter erlaubten Roots (Projektverzeichnisse).
+  - **Audit-Log:** jede Tool-Nutzung append-only protokolliert (wer/was/Ergebnis), abrufbar via `/audit` und CLI.
+  - **Tool-Isolation:** jedes Tool als eigener Permission-Scope; Netzwerk default off außer für HTTP/Research-Tools.
+
+---
+
+## 8. Telegram Bot Architektur (detailliert)
+
+### 8.1 Aufbau
+- **Lib:** `python-telegram-bot` (async) — robust, gut gewartet. Bot ist ein **dünner Client** des `nexoryxd` über den internen Bus → identische Logik wie CLI.
+- **Polling** (Default, kein offener Port) oder **Webhook** (wenn Server erreichbar).
+
+### 8.2 Commands
+`/ask <text>` (KI-Anfrage über Router) · `/run <task>` (Task/Agent-Run) · `/status` (Profil, Modelle, Load) · `/memory [query]` (anzeigen/suchen) · `/project [list|switch|info]` · `/agent [list|status|stop]` · `/audit` · `/cancel` · `/help`.
+
+### 8.3 Remote Execution
+- Tasks aus Chat starten → laufen im Daemon → **Live-Updates** als editierte Telegram-Nachricht (Streaming-Tokens / Fortschritt).
+- **Datei-Upload:** Dokument senden → in Projekt-Workspace ablegen → verarbeitbar.
+- Risiko-Aktionen (Code-Exec, FS-Write) erzeugen **Inline-Keyboard "Approve/Deny"** an Admin, bevor die Sandbox läuft.
+
+### 8.4 Notifications (Event → Chat)
+Task fertig · Fehler erkannt · Agent braucht Input (mit Antwort-Buttons) · Budget-Warnung · System-Status. Abonnierbar/filterbar pro User.
+
+### 8.5 Security (siehe auch §9)
+Auth über **Telegram-User-ID-Allowlist** · Rollen `admin|user|guest` · Rate-Limiting pro User · Command-Whitelisting pro Rolle · alle Aktionen durch dieselbe Permission/Sandbox/Audit-Schicht wie lokal. Kein Klartext-Secret je im Chat.
+
+---
+
+## 9. Security Model für Remote Control
+
+| Ebene | Maßnahme |
+|---|---|
+| Identität | Telegram-ID-Allowlist; optional 2FA-Code beim ersten Pairing (`/pair <code>` vom lokalen CLI generiert) |
+| Autorisierung | Rollen (admin/user/guest) → Command- & Tool-Whitelist je Rolle |
+| Ausführung | Alles Risikoreiche in Sandbox; Security-Agent-Veto; Approve/Deny-Gate für admin-only Aktionen |
+| Datenschutz | Secrets in `~/.nexoryx/secrets` (chmod 600), at-rest-Verschlüsselung sensibler Memory-Felder; keine Secrets in Logs/Chat |
+| Missbrauchsschutz | Rate-Limiting, Budget-Caps, Endlos-/Rekursionslimits, Kill-Switch (`/agent stop`, `nexoryx panic`) |
+| Nachvollziehbarkeit | Append-only Audit-Log mit trace_id über alle Schichten |
+| Netzwerk | Daemon bindet nur localhost; Telegram via Polling (kein offener Port) |
+
+---
+
+## 10. Tech Stack Empfehlung
+
+| Bereich | Wahl | Begründung |
+|---|---|---|
+| Sprache Core | **Python 3.11+** | bestes ML-Ökosystem, gewählt |
+| CLI | **Typer** + Rich | typsicher, schöne Ausgabe |
+| Daemon/API | **FastAPI + uvicorn** (asyncio) | async, schlank |
+| Lokale Inferenz | **llama.cpp** (`llama-cpp-python`) + **Ollama**-Adapter | CPU-stark, GGUF, breit |
+| Tiny-Training | **PyTorch** (+ `tokenizers`, optional `nanoGPT`-Basis) | from-scratch-Kontrolle |
+| Cloud-SDKs | `anthropic`, `openai`, `google-genai` | Multi-Provider |
+| Vector-DB | **sqlite-vec** (→ Qdrant Pro) | null-Setup, CPU-freundlich |
+| Strukt. Daten | SQLite (+ SQLModel/Pydantic) | eingebettet, robust |
+| Telegram | **python-telegram-bot** (async) | reif |
+| Sandbox | Docker → bubblewrap/firejail Fallback | Isolation |
+| Config | YAML + Pydantic-Settings | lesbar, validiert |
+| Web-Dashboard* | TypeScript + React/Vite | optional, Phase 3 |
+| Packaging | pyproject + pipx + Bootstrap-Installer | einfache Installation |
+
+---
+
+## 11. MVP-Entwicklungsplan (0 → 1)
+
+### 11.1 Zielbild MVP (lauffähig)
+Ein Nutzer installiert Nexoryx auf einem schwachen Laptop, stellt per **CLI und Telegram** Anfragen, das System **erkennt die Hardware**, **routet** zwischen einem **lokalen Modell** und **einer Cloud-API**, nutzt **Memory** und **ein Tool (Terminal in Sandbox)**, mit **Permissions + Audit**. Tiny-Model-Rolle anfangs durch Bootstrap-Modell.
+
+### 11.2 Verzeichnisstruktur
+```
+Nexoryx/
+├─ pyproject.toml            # Paket "nexoryx", entry: nexoryx, nexoryxd
+├─ install.sh                # curl|bash → ruft bootstrap.py
+├─ bootstrap.py              # HW-Analyse, venv, Modelle, Keys, Telegram
+├─ README.md
+├─ src/nexoryx/
+│  ├─ platform/   detect.py  profile.py  config.py  logging.py
+│  ├─ brain/      interface.py  bootstrap_model.py  (später) tiny/
+│  ├─ router/     router.py  policy.py  registry.py
+│  │              providers/ {base.py, local_llamacpp.py, ollama.py,
+│  │                          anthropic.py, openai.py, gemini.py}
+│  ├─ orchestrator/ bus.py  orchestrator.py  task.py
+│  ├─ agents/     base.py  planner.py  coder.py  research.py
+│  │              debug.py  tool.py  memory.py  security.py
+│  ├─ memory/     store.py  vector.py  layers.py  ingest.py
+│  ├─ tools/      base.py  terminal.py  filesystem.py  http.py
+│  │              github.py  docker.py  sandbox.py  permissions.py
+│  ├─ interfaces/ cli.py    telegram/{bot.py, handlers.py, auth.py}
+│  └─ daemon/     server.py
+├─ training/      data_gen.py  pretrain.py  finetune.py  distill.py
+│                 export_gguf.py  eval.py        # Tiny-Model, parallel
+│  └─ large/      base_select.py  lora_finetune.py  distill.py
+│                 merge.py  export_gguf.py  eval.py   # Mini/Large, post-MVP
+└─ tests/
+```
+
+### 11.3 Phasen
+**Phase 0 — Fundament (Woche 1)**
+`pyproject`, Paketgerüst, `platform.detect()` + `profile.py`, `config.py`, `nexoryx doctor`, Logging. → *`nexoryx doctor` zeigt korrektes HW-Profil.*
+
+**Phase 1 — Single-Model-Pfad (Woche 1–2)**
+Provider-Adapter `local_llamacpp` + `anthropic`; minimaler Router (Regel-Policy); `BrainInterface` mit Bootstrap-Modell (Qwen0.5B/Regeln) für Intent; `nexoryx ask`. → *CLI-Frage wird lokal beantwortet, bei Bedarf an Cloud geroutet.*
+
+**Phase 2 — Memory + Tools (Woche 2–3)**
+Short/Long/Semantic-Memory (SQLite + sqlite-vec), Auto-Ingest; Terminal-Tool in Sandbox + Permission + Audit. → *System erinnert sich; kann sicher ein Kommando ausführen.*
+
+**Phase 3 — Multi-Agent + restliche Provider (Woche 3–4)**
+Message Bus, Orchestrator, Planner+Coder+Tool+Security-Agent; OpenAI- & Gemini-Adapter; voller Score-Router mit Fallback-Kette + Budget-Guard. → *Mehrschrittige Coding-Task end-to-end.*
+
+**Phase 4 — Telegram (Woche 4–5)**
+Bot als Daemon-Client, Commands, Auth/Rollen, Notifications, Approve/Deny-Gate, Datei-Upload. → *Vollständige Fernsteuerung aus Telegram.*
+
+**Phase 5 — Installer + Härtung (Woche 5–6)**
+`install.sh`/`bootstrap.py` end-to-end, systemd/launchd-Service, profilbasierter Modell-Download, Doku. → *Ein-Befehl-Installation auf frischer Maschine.*
+
+**Parallel-Track A — Tiny Model (ab Woche 2, asynchron):**
+`training/`: Datengenerierung → Pretrain (klein) → Finetune → Distill → GGUF-Export → Eval-Gate. Wenn es die Bootstrap-Baseline schlägt → Config-Switch auf `nexoryx-tiny`. Blockiert kein MVP.
+
+**Parallel-Track B — Mini/Large Model (nach MVP, asynchron):**
+`training/large/`: beste offene Basis wählen → LoRA-Finetune auf Nexoryx-Tasks → Distillation von Cloud-Teachern → Merge → GGUF Q4-Export → Eval gegen offene Basis. Veröffentlichung als `nexoryx-mini` / `nexoryx-large` mit `min_vram`/`min_ram`-Metadaten. Hardware-gated im Installer; blockiert kein MVP (Cloud-Router deckt High-End-Qualität bis dahin ab).
+
+---
+
+## 12. Risiken & technische Herausforderungen
+
+| Risiko | Schweregrad | Mitigation |
+|---|---|---|
+| **Tiny-Model from-scratch** unterperformt / teuer | hoch | Bootstrap-Modell hinter gleichem Interface; Eval-Gate; spezialisierte (nicht generelle) Aufgaben; Distillation |
+| **„Large = Fable 5"-Erwartung** nicht erfüllbar | hoch | Klar kommuniziert: Large = bestes *lokales* Modell auf offener Basis, kein Frontier-Klon; Cloud-Router für echte Frontier-Qualität; hardware-gated |
+| Nexoryx Large läuft auf Grenz-Hardware zu langsam/OOM | mittel | harter `min_vram`/`min_ram`-Gate, Skip im Installer, Router-Ausschluss, Fallback auf Mini/Cloud |
+| Lokale Modelle auf 4-GB-CPU zu langsam | hoch | aggressive Quantisierung (Q4), kleine Modelle, harter `min_ram`-Ausschluss, Cloud-Fallback |
+| Sandbox-Ausbruch / unsichere Remote-Exec | hoch | Docker/bubblewrap, Permission-Gate, Security-Agent-Veto, Audit, Allowlist |
+| Telegram-Secret/Token-Leak | mittel | chmod-600-Secrets, nie in Chat/Logs, Allowlist + Pairing |
+| Cloud-Kosten-Explosion | mittel | Budget-Guard, Downrouting, Semantic-Cache |
+| HW-Detection-Edge-Cases (AMD/Intel-GPU, WSL, Mac-ARM) | mittel | konservative Defaults (CPU-only), Override-Flags, `doctor`-Diagnose |
+| Multi-Agent-Endlosschleifen | mittel | Rekursions-/Budget-Limits, Kill-Switch |
+| Cross-Platform-Installer | mittel | Python-Bootstrap statt bash-Logik, idempotent, viel `doctor` |
+| Komplexität → Über-Engineering | mittel | striktes Plugin-Interface, MVP-Phasen, klare Fallbacks |
+
+---
+
+## 13. Echte Innovationen (Alleinstellung)
+
+1. **Hardware-adaptives Capability-Profil** als zentrale Wahrheit, die *jede* Schicht steuert — dasselbe System skaliert von 4-GB-CPU bis Multi-GPU ohne Code-Zweige.
+2. **Tiny "Control Brain" + Score-Router**: ein winziges, CPU-only Modell trifft Routing/Intent-Vorentscheidungen in <50 ms, bevor teure Modelle anlaufen — drastisch günstiger/schneller als „großes Modell entscheidet alles".
+3. **Geteilter Embedding-Raum** für Routing *und* Memory-Recall → konsistente, billige Personalisierung.
+4. **Self-Improvement-Flywheel**: reale Routing-/Korrektur-Logs fließen ins Tiny-Re-Finetuning → das System wird beim Nutzer messbar besser.
+5. **Graceful-Degradation by design**: garantierte Lauffähigkeit durch durchgängige Fallback-Ketten (Cloud→lokal→Tiny→Regeln) in Router *und* Memory *und* Sandbox.
+6. **Ein Logik-Kern, drei Frontends**: CLI = Telegram = Web sind dünne Clients desselben Daemons → identisches Verhalten, volle Fernsteuerung „for free".
+7. **Security-Agent mit Veto** als eigener Agent im Graph — Sicherheit ist Teil der Orchestrierung, nicht nachträglicher Filter.
+
+---
+
+## 14. Web-Installations-Seite (LAN: 192.168.13.100:3007)
+
+**Zweck & Publikum:** eine im Heim-LAN erreichbare Seite **für mich + Familie** — zeigt prominent den Install-Command und erklärt Schritt für Schritt Installation, Hardware-Anforderungen, Modell-Stufen, Telegram-Setup und Troubleshooting. `192.168.13.100` ist die feste IP **dieses Servers**.
+
+**Design:** bewusst **cool & eigenständig** (Dark-Theme, distinktiver Look über die `frontend-design`-Skill — KEIN generisches AI-Aussehen, kein Inter/Purple-Gradient-Default). Große Copy-Buttons, freundliche, laienverständliche Erklärungen (familientauglich).
+
+> Abgrenzung: **Website = die „coole" Variante.** Das **Git-Repo bekommt eine schlichtere README** (Abschnitt 14.6) — andere, ruhigere Version mit Erklärung + Install-Command.
+
+### 14.1 Tech-Entscheidung
+- **Statische Seite, zero-build** (HTML + eigenem CSS, kein Framework-Zwang) → maximale Einfachheit, läuft überall.
+- **Ausliefern dependency-frei** per Python (schon vorhanden):
+  `python -m http.server 3007 --bind 192.168.13.100 --directory web/public`
+- **Optionaler Upgrade-Pfad:** Astro/Vite-Build nach `web/public/` (gleicher Serve-Befehl), falls später Komponenten/MDX-Docs gewünscht.
+- Alternativ kann `nexoryxd` (FastAPI) die Seite unter `/` mounten — für MVP aber separater, simpler Server.
+
+### 14.2 Struktur
+```
+web/
+├─ public/
+│  ├─ index.html        # Landing + Quick-Install
+│  ├─ install.html      # Schritt-für-Schritt (OS-Tabs)
+│  ├─ assets/styles.css # eigenes Design (kein generisches AI-Theme)
+│  └─ assets/copy.js    # "Copy"-Button für Install-Befehl
+├─ serve.sh             # bindet an 192.168.13.100:3007
+└─ nexoryx-web.service  # optionale systemd --user Unit
+```
+
+### 14.3 Inhalte (Seiten-Sektionen)
+1. **Hero** — Name + Pitch + One-Liner mit Copy-Button:
+   `curl -fsSL http://192.168.13.100:3007/install.sh | bash` *(oder GitHub-URL)*
+2. **Hardware-Anforderungen** — Tabelle der drei Profile (ultra_lite / balanced / pro) + welches Modell wann (Tiny/Mini/Large).
+3. **Installation** — OS-Tabs (Linux/macOS/Windows), Voraussetzungen (Python ≥3.11), `nexoryx doctor`.
+4. **Modelle** — Tiny/Mini/Large erklärt + Hinweis „Large = bestes lokales Modell, kein Frontier-Klon; Cloud-Router für Top-Qualität".
+5. **Telegram-Setup** — Bot-Token + Admin-ID, `--no-telegram` Option.
+6. **CLI-Befehle** — Cheatsheet (`ask`, `run`, `doctor`, `models pull`, `memory`, `panic`).
+7. **Troubleshooting** — häufige HW-Edge-Cases, Logs unter `~/.nexoryx/`.
+
+### 14.4 Serve-Skript `web/serve.sh`
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+HOST="${NEXORYX_WEB_HOST:-192.168.13.100}"
+PORT="${NEXORYX_WEB_PORT:-3007}"
+DIR="$(cd "$(dirname "$0")/public" && pwd)"
+echo "Serving Nexoryx docs on http://$HOST:$PORT  (Ctrl-C zum Beenden)"
+exec python3 -m http.server "$PORT" --bind "$HOST" --directory "$DIR"
+```
+> Hinweis: `--bind 192.168.13.100` setzt voraus, dass diese IP auf dem Host konfiguriert ist (sonst `0.0.0.0` nutzen). Firewall ggf. für Port 3007 im LAN öffnen.
+
+### 14.5 Optionale systemd-Unit `web/nexoryx-web.service`
+```ini
+[Unit]
+Description=Nexoryx Install Docs (LAN)
+After=network-online.target
+
+[Service]
+ExecStart=%h/projects/Nexoryx/web/serve.sh
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+```
+Aktivieren: `systemctl --user enable --now nexoryx-web.service`.
+
+### 14.7 Zusatzfunktionen (persönliche Version — für mich + Familie)
+Die LAN-Seite ist nicht nur Doku, sondern ein kleines **Portal/Dashboard**. Diese Funktionen rufen die lokale `nexoryxd`-API (LAN) auf — Lesen offen im Heimnetz, Aktionen admin-gated:
+
+1. **Live-Status-Widget** — zieht `/status` (aktives Profil, geladene Modelle, CPU/RAM-Last, Daemon online/offline) und zeigt es als Ampel/Karten.
+2. **Mini-„Ask"-Box** — einfaches Eingabefeld → ruft `/ask` der lokalen API → Familie kann **ohne CLI/Telegram** direkt im Browser fragen; Antwort streamt in die Seite.
+3. **Modell-Manager** — Tabelle Tiny/Mini/Large mit Status (installiert / verfügbar / HW-zu-schwach) + Button **„nachladen"** (`nexoryx models pull <name>`, admin-gated).
+4. **Doctor-Ansicht** — `nexoryx doctor`-Ergebnis im Browser (HW-Profil, erkannte GPU/VRAM, Checks grün/rot).
+5. **OS-Auto-Erkennung** — zeigt den passenden Install-Command je nach Browser-User-Agent (Linux/macOS/Windows) automatisch oben an.
+6. **Telegram-Verknüpfung** — Link/QR zum Bot + Anzeige eines **Pairing-Codes** (`/pair`) zum sicheren Koppeln neuer Familien-Geräte.
+7. **Befehls-Cheatsheet** mit Copy-Buttons (ask/run/doctor/models/memory/panic).
+
+**Technik dafür:** Die Seite bleibt statisch (HTML/CSS/JS); die JS-Schicht (`assets/app.js`) spricht per `fetch` die `nexoryxd`-HTTP-API an (gleicher Host, eigener API-Port, z. B. `:3008`). **Security:** Status/Doctor read-only im LAN; `ask`-Box rate-limited; Aktionen (Modell-Pull, Pairing) nur mit Admin-Token (lokal gesetzt). Daemon-API bindet an die LAN-IP, nicht ins Internet.
+
+### 14.6 Git-Repo README.md (schlichtere Variante)
+Eigene, **ruhigere** Doku fürs öffentliche Repo (nicht so „flashy" wie die Website), aber vollständig:
+- **Was ist Nexoryx** (2–3 Sätze).
+- **Install-Command** (Codeblock zum Kopieren): `curl -fsSL https://raw.githubusercontent.com/Benluca1/Nexoryx/main/install.sh | bash`
+- **Voraussetzungen** (Python ≥3.11, OS) + Kurz-Tabelle der HW-Profile.
+- **Erste Schritte** (`nexoryx doctor`, `nexoryx ask`).
+- **Modelle** (Tiny/Mini/Large, ein Satz je).
+- **Telegram-Setup** (kurz).
+- **Lizenz / Hinweis** (öffentliches Repo).
+
+Ton: sachlich, Standard-GitHub-README-Stil — kein Custom-CSS, nur Markdown.
+
+---
+
+## 15. Git-Sync-Skript (Account: Benluca1, öffentliches Repo)
+
+**Zweck:** Ein-Befehl-Sync des `Nexoryx/`-Verzeichnisses zum GitHub-Account **Benluca1**: init bei Bedarf, Remote setzen, `.gitignore` absichern (keine Secrets/Modelle/venv), committen, pushen.
+
+### 15.1 Sicherheits-Vorbedingung — `.gitignore` (wird vom Skript angelegt, falls fehlend)
+```gitignore
+# Secrets & lokale Konfig
+.env
+.env.*
+*.key
+~/.nexoryx/
+secrets/
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+# Modelle & große Artefakte
+models/
+*.gguf
+*.safetensors
+*.bin
+# Logs / DB
+*.log
+*.sqlite
+*.db
+# OS
+.DS_Store
+```
+
+### 15.2 Skript `sync.sh` (Vollversion — wird im Repo-Root abgelegt)
+```bash
+#!/usr/bin/env bash
+# Sync des Nexoryx-Repos zum GitHub-Account Benluca1.
+# Nutzung:  ./sync.sh ["Commit-Nachricht"]
+set -euo pipefail
+
+GH_USER="Benluca1"
+REPO_NAME="Nexoryx"
+BRANCH="${NEXORYX_BRANCH:-main}"
+# SSH bevorzugt; für HTTPS:  https://github.com/$GH_USER/$REPO_NAME.git
+REMOTE_URL="${NEXORYX_REMOTE:-git@github.com:$GH_USER/$REPO_NAME.git}"
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+cd "$ROOT"
+
+MSG="${1:-"sync: $(date '+%Y-%m-%d %H:%M:%S')"}"
+
+# 1) Git initialisieren (falls noch nicht)
+if [ ! -d .git ]; then
+  echo "→ git init"
+  git init -b "$BRANCH"
+fi
+
+# 2) .gitignore sicherstellen (Secrets/Modelle nie pushen)
+if [ ! -f .gitignore ]; then
+  echo "→ .gitignore anlegen"
+  cat > .gitignore <<'EOF'
+.env
+.env.*
+*.key
+secrets/
+__pycache__/
+*.pyc
+.venv/
+venv/
+models/
+*.gguf
+*.safetensors
+*.bin
+*.log
+*.sqlite
+*.db
+.DS_Store
+EOF
+fi
+
+# 3) Remote 'origin' auf Benluca1 setzen/aktualisieren
+if git remote get-url origin >/dev/null 2>&1; then
+  git remote set-url origin "$REMOTE_URL"
+else
+  git remote add origin "$REMOTE_URL"
+fi
+echo "→ origin = $REMOTE_URL"
+
+# 4) Änderungen committen (nur wenn es welche gibt)
+git add -A
+if git diff --cached --quiet; then
+  echo "→ keine Änderungen zum Committen"
+else
+  git commit -m "$MSG" -m "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+fi
+
+# 5) Push (legt Upstream beim ersten Mal an)
+echo "→ push nach origin/$BRANCH"
+git push -u origin "$BRANCH"
+echo "✓ Sync abgeschlossen."
+```
+
+### 15.3 Voraussetzungen / Hinweise
+- **Auth:** SSH-Key für Benluca1 muss auf GitHub hinterlegt sein (`ssh -T git@github.com` → „Hi Benluca1"). Alternativ HTTPS + `gh auth login` / PAT via `NEXORYX_REMOTE=https://...` setzen.
+- **Repo muss auf GitHub existieren** (oder einmalig `gh repo create Benluca1/Nexoryx --public --source=. --remote=origin --push`). Öffentliches Repo → `.gitignore`-Schutz für Secrets/Modelle ist hier besonders wichtig.
+- Skript ist **idempotent**: mehrfach ausführbar, committet nur bei Änderungen.
+- **Secrets-Schutz:** durch `.gitignore` werden `~/.nexoryx/`, `.env`, Modelle (`*.gguf`) etc. nie eingecheckt.
+- Optionaler Auto-Sync: `loop`/cron könnte `./sync.sh` periodisch ausführen (separat, nicht Teil des MVP).
+
+---
+
+## Verification (wie das fertige MVP getestet wird)
+
+1. **HW/Profil:** `nexoryx doctor` auf 2 Maschinen (schwacher CPU-Laptop + GPU-Box) → korrektes Profil, plausible Modell-Auswahl.
+2. **Routing:** `nexoryx ask "..."` mit `--quality` vs. `--fast` → Logs zeigen unterschiedliche Modellwahl + Fallback bei abgeklemmter Cloud.
+3. **Memory:** Fakt in Session A nennen, neue Session B → `nexoryx ask` ruft ihn ab; `nexoryx memory forget` löscht ihn.
+4. **Tools/Security:** Terminal-Tool-Run in Sandbox; Permission-Prompt erscheint; Audit-Log enthält Eintrag; FS-Write außerhalb Jail wird blockiert.
+5. **Multi-Agent:** kleine Coding-Task (Datei erstellen + Test) → Planner→Coder→Tool→Security-Kette im Trace sichtbar.
+6. **Telegram:** `/status`, `/ask`, `/run` von Allowlist-User funktionieren; Nicht-Allowlist-User wird abgewiesen; Approve/Deny-Gate erscheint; Notification bei Task-Ende.
+7. **Installer:** `install.sh` auf frischer VM → bis `nexoryx doctor` grün, ein Befehl.
+8. **Tiny-Model-Gate:** `training/eval.py` → Intent-Accuracy/Routing-F1 + Latenz/RAM auf Referenz-CPU; nur bei Schlagen der Baseline aktivieren.
+
+9. **Web-Seite:** `web/serve.sh` starten → von einem anderen LAN-Gerät `http://192.168.13.100:3007` öffnen → Install-Befehl + Copy-Button + alle Sektionen sichtbar.
+10. **Git-Sync:** `./sync.sh "init"` → Repo erscheint unter `github.com/Benluca1/Nexoryx`; erneuter Lauf ohne Änderungen meldet „keine Änderungen"; `.gitignore` verhindert, dass Secrets/`*.gguf` getrackt werden (`git status` prüfen).
+
+**Test-Tooling:** `pytest` (Unit + Integration mit gemockten Providern), `nexoryx doctor` als Smoke-Test, manuelle E2E-Checkliste oben.

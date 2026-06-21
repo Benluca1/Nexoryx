@@ -1,0 +1,31 @@
+# Secrets & lokale Konfig — NIEMALS pushen
+.env
+.env.*
+*.key
+secrets/
+server-secret
+# das gerenderte (token-haltige) Server-Install-Script nie einchecken
+web/public/install.sh
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Modelle & große Artefakte
+models/
+*.gguf
+*.safetensors
+*.bin
+
+# Logs / DB
+*.log
+*.sqlite
+*.db
+
+# OS
+.DS_Store
+Thumbs.db

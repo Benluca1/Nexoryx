@@ -1,0 +1,141 @@
+/* Nexoryx Install-Seite — eigenständiges Dark-Theme (kein generischer AI-Look).
+   Aesthetik: "Terminal trifft Aurora" — fast schwarz, warmes Amber + Teal,
+   Mono für Befehle. Bewusst KEIN Inter/Purple-Gradient-Default. */
+
+:root {
+  --bg: #07090d;
+  --bg-soft: #0d1118;
+  --panel: #11161f;
+  --panel-2: #161c27;
+  --line: #232c3a;
+  --text: #e7edf5;
+  --muted: #8b97a8;
+  --amber: #ff8a3d;
+  --amber-soft: #ffb27a;
+  --teal: #39d3c3;
+  --green: #5bd97a;
+  --red: #ff6b6b;
+  --mono: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  --sans: "Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
+  --radius: 14px;
+  --maxw: 880px;
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  font-family: var(--sans);
+  color: var(--text);
+  background:
+    radial-gradient(900px 500px at 80% -10%, rgba(255, 138, 61, 0.12), transparent 60%),
+    radial-gradient(800px 600px at 0% 0%, rgba(57, 211, 195, 0.10), transparent 55%),
+    var(--bg);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 22px; }
+
+/* --- Topbar --- */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 20px 0;
+  border-bottom: 1px solid var(--line);
+}
+.brand { display: flex; align-items: center; gap: 12px; font-weight: 700; letter-spacing: 0.5px; }
+.brand .glyph {
+  width: 30px; height: 30px; border-radius: 9px;
+  background: linear-gradient(135deg, var(--amber), var(--teal));
+  display: grid; place-items: center; color: #06121a; font-weight: 900; font-family: var(--mono);
+  box-shadow: 0 0 24px rgba(255, 138, 61, 0.35);
+}
+.topbar nav a { color: var(--muted); text-decoration: none; margin-left: 18px; font-size: 14px; }
+.topbar nav a:hover { color: var(--text); }
+
+/* --- Hero --- */
+.hero { padding: 64px 0 36px; }
+.eyebrow {
+  display: inline-block; font-family: var(--mono); font-size: 12px; letter-spacing: 1.5px;
+  text-transform: uppercase; color: var(--teal);
+  border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px; margin-bottom: 18px;
+}
+.hero h1 { font-size: clamp(34px, 6vw, 56px); line-height: 1.05; margin: 0 0 14px; }
+.hero h1 .accent {
+  background: linear-gradient(120deg, var(--amber), var(--amber-soft));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.hero p.lead { font-size: 18px; color: var(--muted); max-width: 620px; margin: 0 0 30px; }
+
+/* --- Install command box --- */
+.cmd {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 16px 16px 16px 18px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+}
+.cmd .prompt { color: var(--amber); font-family: var(--mono); user-select: none; }
+.cmd code {
+  flex: 1; font-family: var(--mono); font-size: 14.5px; color: var(--text);
+  overflow-x: auto; white-space: nowrap; padding-bottom: 2px;
+}
+.copybtn {
+  flex-shrink: 0; cursor: pointer; border: 1px solid var(--line); background: var(--panel-2);
+  color: var(--text); font-family: var(--mono); font-size: 13px; padding: 9px 14px;
+  border-radius: 10px; transition: all 0.15s ease;
+}
+.copybtn:hover { border-color: var(--amber); color: var(--amber); }
+.copybtn.ok { border-color: var(--green); color: var(--green); }
+
+.os-hint { margin-top: 12px; font-size: 13px; color: var(--muted); }
+.os-hint b { color: var(--teal); }
+
+/* --- Sections --- */
+section { padding: 40px 0; border-top: 1px solid var(--line); }
+section h2 { font-size: 26px; margin: 0 0 8px; }
+section h2 .num { font-family: var(--mono); color: var(--amber); font-size: 18px; margin-right: 10px; }
+section p.sub { color: var(--muted); margin: 0 0 22px; }
+
+/* --- Cards / grid --- */
+.grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; }
+.card h3 { margin: 0 0 6px; font-size: 16px; }
+.card h3 .tag { font-family: var(--mono); font-size: 11px; color: var(--teal); margin-left: 6px; }
+.card p { margin: 0; color: var(--muted); font-size: 14px; }
+.card.lite { border-left: 3px solid var(--teal); }
+.card.balanced { border-left: 3px solid var(--amber); }
+.card.pro { border-left: 3px solid var(--green); }
+
+/* --- Table --- */
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 11px 12px; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+td.mono, code.inline { font-family: var(--mono); }
+code.inline { background: var(--panel-2); border: 1px solid var(--line); padding: 1px 6px; border-radius: 6px; font-size: 13px; }
+
+/* --- Steps --- */
+ol.steps { counter-reset: step; list-style: none; padding: 0; margin: 0; }
+ol.steps li { position: relative; padding: 0 0 18px 44px; }
+ol.steps li::before {
+  counter-increment: step; content: counter(step);
+  position: absolute; left: 0; top: 0; width: 28px; height: 28px; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); color: var(--amber);
+  display: grid; place-items: center; font-family: var(--mono); font-weight: 700;
+}
+
+/* --- Callout --- */
+.callout {
+  background: linear-gradient(180deg, rgba(57, 211, 195, 0.08), transparent);
+  border: 1px solid var(--line); border-left: 3px solid var(--teal);
+  border-radius: var(--radius); padding: 16px 18px; color: var(--muted); font-size: 14px;
+}
+.callout b { color: var(--text); }
+
+footer { padding: 36px 0 60px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); }
+footer a { color: var(--teal); }
+
+@media (max-width: 560px) {
+  .cmd code { font-size: 12.5px; }
+  .topbar nav { display: none; }
+}

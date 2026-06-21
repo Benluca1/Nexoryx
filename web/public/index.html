@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Nexoryx — installieren</title>
+  <meta name="description" content="Nexoryx installieren — dein lokales + cloudfähiges KI-Multi-Agenten-System." />
+  <link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body>
+  <div class="wrap">
+
+    <header class="topbar">
+      <div class="brand"><span class="glyph">N</span> Nexoryx</div>
+      <nav>
+        <a href="#install">Installieren</a>
+        <a href="#hardware">Hardware</a>
+        <a href="#modelle">Modelle</a>
+        <a href="install.html">Anleitung</a>
+      </nav>
+    </header>
+
+    <section class="hero" style="border:0">
+      <span class="eyebrow">Lokales + Cloud KI-System</span>
+      <h1>Dein eigener <span class="accent">KI-Assistent</span>,<br />auf jedem Gerät.</h1>
+      <p class="lead">
+        Nexoryx läuft sogar auf alten Laptops, erkennt deine Hardware automatisch und
+        wählt selbst das beste Modell — lokal oder Cloud. Steuerbar per Terminal und Telegram.
+      </p>
+
+      <div id="install" class="cmd">
+        <span class="prompt">$</span>
+        <code id="install-cmd">curl -fsSL http://192.168.13.100:3007/install.sh | bash</code>
+        <button class="copybtn" data-copy-target="#install-cmd">kopieren</button>
+      </div>
+      <p class="os-hint" id="os-hint">
+        Erkanntes System: <b data-os>…</b> · von <b>diesem Server</b> installiert = <b>Admin-Modus</b> 🔑
+      </p>
+    </section>
+
+    <section id="hardware">
+      <h2><span class="num">01</span>Läuft das auf meinem Gerät?</h2>
+      <p class="sub">Nexoryx passt sich automatisch an. Drei Stufen, je nach Hardware:</p>
+      <div class="grid">
+        <div class="card lite">
+          <h3>Ultra-Lite <span class="tag">CPU-only</span></h3>
+          <p>Alte Laptops, ab ~4 GB RAM. Kleines lokales Modell, sehr sparsam.</p>
+        </div>
+        <div class="card balanced">
+          <h3>Balanced <span class="tag">8 GB+</span></h3>
+          <p>Normale Rechner. Kleine + mittlere Modelle, optional Cloud.</p>
+        </div>
+        <div class="card pro">
+          <h3>Pro <span class="tag">GPU</span></h3>
+          <p>Starke GPU (≥24 GB VRAM) oder ≥48 GB RAM. Große Modelle, Multi-Agent.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="modelle">
+      <h2><span class="num">02</span>Die Modelle</h2>
+      <p class="sub">Eigene, gestaffelte Modell-Familie — automatisch passend installiert.</p>
+      <table>
+        <thead><tr><th>Modell</th><th>Rolle</th><th>Ab Stufe</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">nexoryx-tiny</td><td>„Control Brain": Intent &amp; Routing</td><td>immer</td></tr>
+          <tr><td class="mono">nexoryx-mini</td><td>Lokales Allzweck-Modell</td><td>Balanced</td></tr>
+          <tr><td class="mono">nexoryx-large</td><td>Bestes lokales Modell (Coding/Reasoning)</td><td>Pro</td></tr>
+        </tbody>
+      </table>
+      <p class="sub" style="margin-top:14px">
+        Für absolute Spitzenqualität routet Nexoryx automatisch in die Cloud
+        (Anthropic, OpenAI, Google) — du gibst die Keys bei der Installation an.
+      </p>
+    </section>
+
+    <section>
+      <h2><span class="num">03</span>In 3 Schritten startklar</h2>
+      <ol class="steps">
+        <li><b>Befehl kopieren</b> (oben) und im Terminal einfügen.</li>
+        <li><b>Fragen beantworten</b> — Nexoryx prüft die Hardware und fragt optional nach API-Keys &amp; Telegram.</li>
+        <li><b>Loslegen:</b> <code class="inline">nexoryx ask "Hallo"</code> oder über den Telegram-Bot.</li>
+      </ol>
+      <p class="sub" style="margin-top:6px">
+        Ausführliche Schritt-für-Schritt-Anleitung pro Betriebssystem →
+        <a href="install.html" style="color:var(--teal)">install.html</a>
+      </p>
+    </section>
+
+    <section>
+      <h2><span class="num">04</span>Wichtige Befehle</h2>
+      <table>
+        <tbody>
+          <tr><td class="mono">nexoryx doctor</td><td>Hardware + Profil prüfen</td></tr>
+          <tr><td class="mono">nexoryx ask "…"</td><td>Eine Frage stellen</td></tr>
+          <tr><td class="mono">nexoryx models list</td><td>Verfügbare Modelle anzeigen</td></tr>
+          <tr><td class="mono">nexoryx admin status</td><td>Admin-Status (nur Server-Install)</td></tr>
+          <tr><td class="mono">nexoryx panic</td><td>Not-Aus: alles stoppen</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <div class="callout">
+        <b>Admin-Funktionen nur über diesen Server.</b> Wer Nexoryx über
+        <code class="inline">192.168.13.100</code> installiert, wird Owner/Admin seines Geräts
+        (Modelle, Keys, Rollen, Logs verwalten). Installationen aus dem öffentlichen Repo
+        laufen im normalen User-Modus.
+      </div>
+    </section>
+
+    <footer>
+      Nexoryx · lokales KI-System für mich &amp; Familie ·
+      Repo: <a href="https://github.com/Benluca1/Nexoryx">github.com/Benluca1/Nexoryx</a>
+    </footer>
+
+  </div>
+  <script src="assets/copy.js"></script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+[Unit]
+Description=Nexoryx Install Docs (LAN)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=%h/projects/Nexoryx/web/serve.sh
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

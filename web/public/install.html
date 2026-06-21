@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Nexoryx — Installations-Anleitung</title>
+  <link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body>
+  <div class="wrap">
+
+    <header class="topbar">
+      <div class="brand"><span class="glyph">N</span> Nexoryx</div>
+      <nav>
+        <a href="index.html">Start</a>
+        <a href="#voraussetzungen">Voraussetzungen</a>
+        <a href="#schritte">Schritte</a>
+        <a href="#hilfe">Hilfe</a>
+      </nav>
+    </header>
+
+    <section class="hero" style="border:0">
+      <span class="eyebrow">Schritt für Schritt</span>
+      <h1>Nexoryx <span class="accent">installieren</span></h1>
+      <p class="lead">Ein Befehl genügt. Erkanntes System: <b data-os style="color:var(--teal)">…</b></p>
+      <div class="cmd">
+        <span class="prompt">$</span>
+        <code id="install-cmd">curl -fsSL http://192.168.13.100:3007/install.sh | bash</code>
+        <button class="copybtn" data-copy-target="#install-cmd">kopieren</button>
+      </div>
+      <p class="os-hint" id="os-hint" style="visibility:hidden">x<b data-os></b></p>
+    </section>
+
+    <section id="voraussetzungen">
+      <h2><span class="num">01</span>Voraussetzungen</h2>
+      <ul>
+        <li><b>Python 3.11+</b> — prüfen mit <code class="inline">python3 --version</code></li>
+        <li><b>curl</b> und (empfohlen) <b>git</b></li>
+        <li>Internet für den Erst-Download der Modelle</li>
+      </ul>
+    </section>
+
+    <section id="schritte">
+      <h2><span class="num">02</span>Pro Betriebssystem</h2>
+
+      <div class="card" data-os-tab="Linux" style="margin-bottom:14px">
+        <h3>🐧 Linux</h3>
+        <p>Terminal öffnen, Befehl einfügen, ausführen. Fertig.</p>
+        <div class="cmd" style="margin-top:12px">
+          <span class="prompt">$</span>
+          <code id="cmd-linux">curl -fsSL http://192.168.13.100:3007/install.sh | bash</code>
+          <button class="copybtn" data-copy-target="#cmd-linux">kopieren</button>
+        </div>
+      </div>
+
+      <div class="card" data-os-tab="macOS" style="margin-bottom:14px">
+        <h3>🍎 macOS</h3>
+        <p>Falls Python fehlt: <code class="inline">brew install python@3.12</code>, dann:</p>
+        <div class="cmd" style="margin-top:12px">
+          <span class="prompt">$</span>
+          <code id="cmd-mac">curl -fsSL http://192.168.13.100:3007/install.sh | bash</code>
+          <button class="copybtn" data-copy-target="#cmd-mac">kopieren</button>
+        </div>
+      </div>
+
+      <div class="card" data-os-tab="Windows" style="margin-bottom:14px">
+        <h3>🪟 Windows</h3>
+        <p>Empfohlen via <b>WSL</b> (Ubuntu) oder Git-Bash. In der WSL-Shell:</p>
+        <div class="cmd" style="margin-top:12px">
+          <span class="prompt">$</span>
+          <code id="cmd-win">curl -fsSL http://192.168.13.100:3007/install.sh | bash</code>
+          <button class="copybtn" data-copy-target="#cmd-win">kopieren</button>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2><span class="num">03</span>Prüfen</h2>
+      <div class="cmd">
+        <span class="prompt">$</span>
+        <code id="cmd-doctor">python3 -m nexoryx doctor</code>
+        <button class="copybtn" data-copy-target="#cmd-doctor">kopieren</button>
+      </div>
+      <p class="sub" style="margin-top:12px">Zeigt erkannte Hardware, gewähltes Profil und welche Modelle erlaubt sind.</p>
+    </section>
+
+    <section>
+      <h2><span class="num">04</span>Telegram (optional)</h2>
+      <p class="sub">Während der Installation kannst du einen Bot-Token + deine Telegram-User-ID angeben.
+        Ohne Telegram: bei der Abfrage einfach überspringen (oder <code class="inline">--no-telegram</code>).</p>
+    </section>
+
+    <section id="hilfe">
+      <h2><span class="num">05</span>Hilfe &amp; Troubleshooting</h2>
+      <ul>
+        <li><b>python3 nicht gefunden</b> → Python 3.11+ installieren, Terminal neu öffnen.</li>
+        <li><b>Modell zu groß / langsam</b> → normal auf schwacher Hardware; Nexoryx nutzt automatisch das kleinste passende Modell oder die Cloud.</li>
+        <li><b>Logs</b> liegen unter <code class="inline">~/.nexoryx/</code>.</li>
+      </ul>
+      <div class="callout" style="margin-top:16px">
+        <b>Hinweis:</b> Installation über <code class="inline">192.168.13.100</code> = Admin-Modus.
+        Aus dem öffentlichen Repo installiert = User-Modus (ohne Admin-Funktionen).
+      </div>
+    </section>
+
+    <footer>
+      <a href="index.html">← zurück zur Startseite</a> ·
+      Repo: <a href="https://github.com/Benluca1/Nexoryx">github.com/Benluca1/Nexoryx</a>
+    </footer>
+
+  </div>
+  <script src="assets/copy.js"></script>
+</body>
+</html>
