@@ -212,11 +212,13 @@ def _select(question: str, choices: list[str], default: int = 0) -> int:
                 sys.stdout.write("\n")
                 raise KeyboardInterrupt
             elif ch == b"\x1b":
-                rest = sys.stdin.buffer.read(2)
-                if rest == b"[A":
-                    current[0] = (current[0] - 1) % n
-                elif rest == b"[B":
-                    current[0] = (current[0] + 1) % n
+                b1 = sys.stdin.buffer.read(1)
+                if b1 == b"[":
+                    b2 = sys.stdin.buffer.read(1)
+                    if b2 == b"A":
+                        current[0] = (current[0] - 1) % n
+                    elif b2 == b"B":
+                        current[0] = (current[0] + 1) % n
             sys.stdout.write(f"\033[{n_lines}A")
             out = _draw()
             sys.stdout.write(out)
@@ -273,11 +275,13 @@ def _multiselect(question: str, choices: list[str], defaults: list[int] | None =
                 else:
                     selected.add(current[0])
             elif ch == b"\x1b":
-                rest = sys.stdin.buffer.read(2)
-                if rest == b"[A":
-                    current[0] = (current[0] - 1) % n
-                elif rest == b"[B":
-                    current[0] = (current[0] + 1) % n
+                b1 = sys.stdin.buffer.read(1)
+                if b1 == b"[":
+                    b2 = sys.stdin.buffer.read(1)
+                    if b2 == b"A":
+                        current[0] = (current[0] - 1) % n
+                    elif b2 == b"B":
+                        current[0] = (current[0] + 1) % n
             sys.stdout.write(f"\033[{n_lines}A")
             out = _draw()
             sys.stdout.write(out)
@@ -371,35 +375,58 @@ def main() -> int:
     allowed = [m for m, ok in gates.items() if ok]
     _ok(f"Erlaubte Modelle: {', '.join(allowed) or '—'}")
 
-    # 3) Ollama-Modell ziehen?
-    print(f"\n  {_B}Ollama-Startmodell{_RST}")
+    # 3) House-Modell automatisch ziehen
+    print(f"\n  {_B}House-Modell (automatische Installation){_RST}")
     try:
         from nexoryx.training.house import recommended_base
         base = recommended_base(profile, hw)
         rec_tag = base["ollama"]
+        hf_base = base["hf"]
     except Exception:
         rec_tag = "qwen2.5:0.5b" if hw.ram_mb < 8000 else "qwen2.5:7b"
+        hf_base = "Qwen/Qwen2.5-0.5B-Instruct" if hw.ram_mb < 8000 else "Qwen/Qwen2.5-7B-Instruct"
 
     if shutil.which("ollama"):
-        # Wenn vom Installer aufgerufen: Modell wird schon im Hintergrund geladen → Standard "Nein"
-        pull_default = 1 if args.source == "server" else 0
-        pull_idx = _select(
-            f"Empfohlenes Modell '{rec_tag}' jetzt laden?",
-            [f"Ja, '{rec_tag}' laden (~{'5 GB' if '7b' in rec_tag else '400 MB'})",
-             "Später manuell:  ollama pull <modell>"],
-            default=pull_default,
-        )
-        if pull_idx == 0:
-            print(f"  Lade {rec_tag} …")
-            r = subprocess.run(["ollama", "pull", rec_tag], capture_output=False)
-            if r.returncode == 0:
-                _ok(f"{rec_tag} geladen")
-            else:
-                _warn(f"Pull fehlgeschlagen — manuell: ollama pull {rec_tag}")
+        size_hint = "~5 GB" if "14b" in rec_tag else "~2 GB" if "3b" in rec_tag else "~400 MB"
+        print(f"  Lade {_C}{rec_tag}{_RST}  ({size_hint}) …")
+        r = subprocess.run(["ollama", "pull", rec_tag], capture_output=False)
+        if r.returncode == 0:
+            _ok(f"House-Modell '{rec_tag}' bereit")
+        else:
+            _warn(f"Pull fehlgeschlagen — manuell: ollama pull {rec_tag}")
+            rec_tag = ""
     else:
-        _warn("Ollama nicht gefunden — Modell-Download übersprungen")
-        _warn("Ollama installieren: https://ollama.com  oder:  curl -fsSL https://ollama.com/install.sh | sh")
+        _warn("Ollama nicht gefunden — House-Modell-Download übersprungen")
+        _warn("Ollama installieren:  curl -fsSL https://ollama.com/install.sh | sh")
         rec_tag = ""
+
+    # House-Modell Training vorbereiten / starten
+    if rec_tag:
+        print(f"\n  {_B}House-Modell Training{_RST}")
+        try:
+            from nexoryx.training import train as train_mod, dataset as ds_mod
+            st = ds_mod.stats()
+            from nexoryx.training.train import MIN_EXAMPLES
+            if st["total"] >= MIN_EXAMPLES:
+                print(f"  {st['total']} Beispiele vorhanden — starte Training …")
+                out_dir = Path.home() / ".nexoryx" / "training"
+                result = train_mod.train(repo_root=out_dir)
+                if result.get("action") == "trained":
+                    _ok(f"House-Modell trainiert (Version {result.get('house_version', 1)})")
+                elif result.get("action") == "script_generated":
+                    _ok(f"Trainings-Skript generiert: {result['script']}")
+                    _warn(f"Deps fehlen: pip install {' '.join(result['deps_missing'])} trl accelerate")
+                    _warn(f"Dann: python {result['script']}")
+                else:
+                    _warn(f"Training: {result.get('reason', result.get('error', 'unbekannt'))}")
+            else:
+                _ok(
+                    f"Training startet automatisch nach {MIN_EXAMPLES} Beispielen "
+                    f"({st['total']} gesammelt)"
+                )
+                _ok(f"Basis: {hf_base}  ·  Fine-Tune via LoRA  ·  wird lokal gespeichert")
+        except Exception as exc:
+            _warn(f"Training-Setup: {exc}")
 
     # 4) Cloud-Provider
     providers = ["Anthropic Claude (empfohlen)", "OpenAI GPT-4o", "Google Gemini", "Keinen — nur lokal"]
@@ -467,21 +494,36 @@ def main() -> int:
         cfg.house_base = rec_tag
     cfg_mod.save(cfg)
 
-    # 7) Abschluss
+    # 7) PATH in Shell-Config eintragen (idempotent, nur wenn nötig)
+    venv_bin = Path(sys.executable).parent
+    path_line = f'export PATH="{venv_bin}:$PATH"'
+    path_added = False
+    for rc in [Path.home() / ".bashrc", Path.home() / ".zshrc"]:
+        if rc.exists() and str(venv_bin) not in rc.read_text():
+            with rc.open("a") as f:
+                f.write(f"\n# Nexoryx\n{path_line}\n")
+            _ok(f"PATH in {rc.name} eingetragen")
+            path_added = True
+
+    # 8) Abschluss
     print()
     _rule("━")
     msg = "Nexoryx ist bereit!"
     print(f"  {' ' * ((_W - len(msg)) // 2)}{_G}{_B}{msg}{_RST}")
     _rule("━")
     inst = "admin" if role == "admin" else "user"
+    shell_hint = (
+        f"\n  {_Y}→ Neues Terminal öffnen oder:  source ~/.bashrc{_RST}"
+        if path_added else ""
+    )
     print(f"""
   {_B}Rolle:{_RST}  {_C}{role}{_RST}  ·  Profil: {_C}{profile.name}{_RST}  ·  Install: {inst}
-
+{shell_hint}
   {_B}Loslegen:{_RST}
-    {_C}nex{_RST}                  TUI starten (Fragen stellen)
-    {_C}nexoryx doctor{_RST}       Hardware + Profil + Modelle prüfen
-    {_C}nexoryx ask "Hallo"{_RST}  Erste Frage (Router wählt automatisch)
-    {_C}nexoryx models list{_RST}  Verfügbare Modelle anzeigen
+    {_C}nex{_RST}                   TUI starten (Fragen stellen)
+    {_C}nexoryx doctor{_RST}        Hardware + Profil + Modelle prüfen
+    {_C}nexoryx chat{_RST}          Interaktiver Chat starten
+    {_C}nexoryx models list{_RST}   Verfügbare Modelle anzeigen
 
   {_DIM}Lokales Modell ziehen:  nexoryx models pull house{_RST}
   {_DIM}Cloud-Key setzen:       nexoryx admin keys set anthropic{_RST}
