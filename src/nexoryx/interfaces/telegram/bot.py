@@ -51,7 +51,8 @@ HELP = """\
 /models — Verfügbare Modelle
 /usage — API-Kosten & Token
 /tools — Verfügbare Tools
-/train — Hausmodell trainieren
+/train — Training-Status anzeigen
+/autotrain — Hausmodell im Hintergrund trainieren (Admin)
 /audit — letzte Aktionen (Admin)
 /whoami — Deine Nutzer-Info
 /agent — Agenten auflisten
@@ -322,10 +323,35 @@ def _handle(token, chat_id, user_id, first_name, role, text, orch, memory, priva
 
     # ── Training ──────────────────────────────────────────────────────────────
     elif cmd == "train":
+        # Nur Status anzeigen, kein Training starten (dafür /autotrain)
+        try:
+            from ...training.train import train_report
+            report = train_report()
+            total = report["dataset"]["total"]
+            teacher = report["dataset"].get("teacher", 0)
+            MIN = 50
+            deps = report.get("deps_missing", [])
+            _send(token, chat_id,
+                  f"📊 *Training-Status*\n"
+                  f"Datensatz: {total} Beispiele ({teacher} Cloud/Teacher)\n"
+                  f"Minimum: {MIN}\n"
+                  f"Basismodell: {report.get('house_base', '?')}\n"
+                  f"Bereits trainiert: {'✅' if report.get('house_trained') else '—'}\n"
+                  f"Version: {report.get('house_version', 0)}\n"
+                  f"Fehlende Deps: {', '.join(deps) if deps else 'keine ✅'}\n\n"
+                  f"{'✅ Bereit für /autotrain' if total >= MIN else f'⏳ Noch {MIN - total} Beispiele nötig'}",
+                  parse_mode="Markdown")
+        except Exception as exc:
+            _send(token, chat_id, f"❌ Fehler: {exc}")
+
+    elif cmd == "autotrain":
+        if role not in ("admin", "owner"):
+            return _send(token, chat_id, "⛔ Nur Admin darf /autotrain nutzen.")
         _typing(token, chat_id)
         try:
-            from ...training.train import train_report, train
+            from ...training.train import train_report
             from pathlib import Path
+            import threading
             report = train_report()
             total = report["dataset"]["total"]
             MIN = 50
@@ -334,19 +360,43 @@ def _handle(token, chat_id, user_id, first_name, role, text, orch, memory, priva
                       f"⏳ Noch {MIN - total} Beispiele nötig (aktuell {total}/{MIN}).\n"
                       "Nutze den Bot weiter — jede Anfrage sammelt Daten.")
                 return
-            _send(token, chat_id, f"🏋️ Starte Training ({total} Beispiele) …")
-            result = train(Path.home() / ".nexoryx" / "training_run")
-            action = result.get("action", "?")
-            if action == "trained":
-                _send(token, chat_id, f"✅ Training abgeschlossen — Version {result.get('house_version')}")
-            elif action == "script_generated":
-                _send(token, chat_id,
-                      f"📝 Training-Skript erzeugt.\nFehlende Deps: {', '.join(result.get('deps_missing', []))}\n"
-                      f"Befehl: {result.get('instructions', '')}")
-            elif action == "failed":
-                _send(token, chat_id, f"❌ Training fehlgeschlagen: {result.get('error')}")
-            else:
-                _send(token, chat_id, f"ℹ️ {result.get('reason', action)}")
+
+            def _bg_train():
+                from ...training.train import train
+                from ...training.scheduler import _notify_telegram, _save_last_count
+                try:
+                    out_dir = Path.home() / ".nexoryx" / "auto_training"
+                    result = train(out_dir)
+                    action = result.get("action", "?")
+                    if action == "trained":
+                        v = result.get("house_version", "?")
+                        _notify_telegram(f"✅ *Auto-Training abgeschlossen* — Version {v}")
+                        _save_last_count(total)
+                    elif action == "script_generated":
+                        deps_str = ", ".join(result.get("deps_missing", []))
+                        _notify_telegram(
+                            f"📝 *Training-Skript erzeugt*\n"
+                            f"Fehlende Pakete: {deps_str}\n"
+                            f"{result.get('instructions', '')}"
+                        )
+                        _save_last_count(total)
+                    elif action == "failed":
+                        _notify_telegram(f"❌ *Auto-Training fehlgeschlagen*\n{result.get('error', '?')}")
+                    try:
+                        from ...training.on_exit import run_background
+                        run_background(console=None)
+                    except Exception:
+                        pass
+                except Exception as exc:
+                    _notify_telegram(f"❌ *Auto-Train Ausnahme:* {exc}")
+
+            t = threading.Thread(target=_bg_train, daemon=True, name="nexoryx-tg-autotrain")
+            t.start()
+            _send(token, chat_id,
+                  f"🏋️ *Auto-Training gestartet im Hintergrund*\n"
+                  f"Datensatz: {total} Beispiele\n"
+                  f"Du bekommst eine Nachricht wenn es fertig ist.",
+                  parse_mode="Markdown")
         except Exception as exc:
             _send(token, chat_id, f"❌ Fehler: {exc}")
 

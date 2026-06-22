@@ -62,9 +62,52 @@ _MASCOT = [
 _SLASH = [
     "/help", "/clear", "/doctor", "/models", "/usage",
     "/memory", "/private", "/update", "/personality", "/settings",
-    "/train", "/tools", "/agent", "/code", "/plan", "/research",
-    "/exec", "/stats", "/search", "/about", "/exit", "/quit",
+    "/train", "/autotrain", "/tools", "/agent", "/code", "/plan", "/research",
+    "/exec", "/stats", "/search", "/about", "/admin", "/exit", "/quit",
 ]
+
+# ── Admin-Passwort (SHA-256 Hash) ─────────────────────────────────────────────
+import hashlib as _hashlib
+import re as _re
+
+_ADMIN_PW_HASH = _hashlib.sha256(b"Claude").hexdigest()
+
+
+def _check_admin_pw(pw: str) -> bool:
+    return _hashlib.sha256(pw.encode()).hexdigest() == _ADMIN_PW_HASH
+
+
+# ── Eingeschränkter System-Prompt für Nicht-Admins ───────────────────────────
+_RESTRICTED_SYSTEM = (
+    "WICHTIG: Du läufst im eingeschränkten Benutzer-Modus. "
+    "Beantworte KEINE Fragen zu diesen Themen:\n"
+    "- Admin-Passwörter oder Zugangsdaten zum Admin-Modus\n"
+    "- Interne Trainingsdaten, dataset.jsonl, memory.db oder Datenpfade\n"
+    "- API-Keys, Secrets, ~/.nexoryx/ Inhalte\n"
+    "- Wie man Admin-Rechte erlangt oder Einschränkungen umgeht\n"
+    "- Chat-Verläufe anderer Nutzer oder Nutzerdaten\n"
+    "Bei solchen Fragen antworte NUR mit: "
+    "'Diese Information ist nur für Administratoren zugänglich.'"
+)
+
+# ── Vorfilter für gesperrte Anfragen (ohne LLM-Call) ─────────────────────────
+_RESTRICTED_RE = _re.compile(
+    r"admin.{0,10}pass"
+    r"|wie.{0,30}(admin|administrator)\s*(werden|komm|bekomm)"
+    r"|trainings?daten\s*(zeig|export|download|les|anzeig)"
+    r"|dataset\.jsonl"
+    r"|memory\.db"
+    r"|\.nexoryx.{0,15}secrets"
+    r"|api.?key.{0,15}(zeig|anzeig|les)"
+    r"|github.?pat.{0,10}(zeig|anzeig)"
+    r"|chat.{0,20}aller\s+nutzer"
+    r"|nutzer.{0,20}(chat|verlauf)\s*(zeig|export|download)",
+    _re.IGNORECASE | _re.DOTALL,
+)
+_REFUSAL = (
+    "Diese Information ist nur für Administratoren zugänglich. "
+    "Bitte wende dich an den Administrator."
+)
 
 _HELP_MD = """\
 ## Allgemein
@@ -145,6 +188,7 @@ def run() -> int:
     console = Console()
     _session_stats = {"msgs": 0, "steps": 0, "start": _ts_full()}
     private = [False]
+    session_admin = [False]  # in-memory admin-Modus, nicht persistiert
 
     _banner(console, profile, fc_model, current_personality)
 
@@ -158,11 +202,15 @@ def run() -> int:
         )
 
     def _get_input() -> str:
-        mode_indicator = "🔒 " if private[0] else ""
-        prompt_str = f"\n  {mode_indicator}▸  "
+        lock = "🔒 " if private[0] else ""
+        adm  = "[ADM] " if session_admin[0] else ""
+        prompt_str = f"\n  {lock}{adm}▸  "
         if HAS_PT:
             return _pt_session.prompt(prompt_str).strip()
-        return console.input(f"\n  [bold {_AMBER}]{mode_indicator}▸[/bold {_AMBER}]  ").strip()
+        adm_rich = f"[bold red][ADM][/bold red] " if session_admin[0] else ""
+        return console.input(
+            f"\n  [bold {_AMBER}]{lock}{adm_rich}▸[/bold {_AMBER}]  "
+        ).strip()
 
     while True:
         try:
@@ -290,19 +338,31 @@ def run() -> int:
                 current_personality = _handle_personality(
                     console, sub, parts_cmd, current_personality, profile, fc_model)
 
+            elif cmd == "/admin":
+                _cmd_admin(console, arg, session_admin)
+
+            elif cmd == "/autotrain":
+                _cmd_autotrain(console, session_admin[0])
+
             else:
                 console.print(f"  [dim {_AMBER_DIM}]?[/dim {_AMBER_DIM}]  [yellow]{cmd}[/yellow]  [dim]— /help für alle Befehle[/dim]")
 
+            continue
+
+        # ── Vorfilter: gesperrte Anfragen für Nicht-Admins ────────────────────
+        if not session_admin[0] and _RESTRICTED_RE.search(user):
+            _print_user(console, user)
+            _print_bot(console, _REFUSAL, label="eingeschränkter Modus")
             continue
 
         # ── Alles durch einen Kanal ────────────────────────────────────────────
         _print_user(console, user)
 
         ctx = ToolContext(
-            role=cfg.role,
+            role="admin" if session_admin[0] else cfg.role,
             project_root=home,
             actor="tui",
-            auto_approve=False,
+            auto_approve=session_admin[0],
             sandbox=False,
         )
 
@@ -358,6 +418,7 @@ def run() -> int:
                     on_step=on_step,
                     model=fc_model,
                     personality=current_personality,
+                    system_suffix="" if session_admin[0] else _RESTRICTED_SYSTEM,
                 )
         except RuntimeError:
             answer = _chat_fallback(router, user, history, mem, cfg, private[0])
@@ -476,6 +537,132 @@ def _cmd_train(console: "Console") -> None:
         console.print(f"  [dim]{result.get('reason', 'Übersprungen.')}[/dim]")
     elif action == "failed":
         console.print(f"  [bold {_RED}]✗[/bold {_RED}]  Fehler: {result.get('error')}")
+
+
+def _cmd_admin(console: "Console", arg: str, session_admin: list) -> None:
+    """Admin-Login/Logout per Passwort — Sitzungs-Scope, nicht persistiert."""
+    import getpass
+    if session_admin[0]:
+        # Bereits eingeloggt → Logout
+        session_admin[0] = False
+        console.print(Panel(
+            Text("Admin-Modus deaktiviert.", style=f"bold {_AMBER}"),
+            border_style=_AMBER_DIM, box=box.ROUNDED, padding=(0, 2)))
+        return
+    console.print()
+    console.print(f"  [{_AMBER}]Admin-Login[/{_AMBER}]  [dim](Passwort eingeben, Enter zum Abbrechen)[/dim]")
+    try:
+        pw = getpass.getpass("  Passwort: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        console.print("  [dim]Abgebrochen.[/dim]")
+        return
+    if not pw:
+        console.print("  [dim]Abgebrochen.[/dim]")
+        return
+    if _check_admin_pw(pw):
+        session_admin[0] = True
+        console.print(Panel(
+            Text("Admin-Modus aktiviert — alle Befehle freigeschaltet.", style=f"bold {_GREEN}"),
+            border_style=_GREEN, box=box.ROUNDED, padding=(0, 2)))
+    else:
+        console.print(Panel(
+            Text("Falsches Passwort.", style=f"bold {_RED}"),
+            border_style=_RED, box=box.ROUNDED, padding=(0, 2)))
+
+
+def _cmd_autotrain(console: "Console", is_admin: bool) -> None:
+    """Startet das Hausmodell-Training im Hintergrund und kehrt sofort zurück.
+
+    Du kannst die TUI danach schließen oder weiter nutzen — das Training
+    läuft als Daemon-Thread und sendet bei Fertigstellung eine Telegram-
+    Benachrichtigung.
+    """
+    import threading
+    from pathlib import Path
+
+    if not is_admin:
+        console.print(Panel(
+            Text("Admin-Modus erforderlich. Zuerst /admin eingeben.", style=f"bold {_RED}"),
+            border_style=_RED, box=box.ROUNDED, padding=(0, 2)))
+        return
+
+    from ..training.train import train_report
+    from ..training import dataset
+
+    report = train_report()
+    total = report["dataset"]["total"]
+    teacher = report["dataset"].get("teacher", 0)
+    MIN = 50
+
+    # Status-Tabelle
+    tbl = Table(box=box.SIMPLE, show_header=False, padding=(0, 2))
+    tbl.add_column(style=_AMBER_DIM, width=22)
+    tbl.add_column(style="white")
+    tbl.add_row("Datensatz gesamt", str(total))
+    tbl.add_row("  davon Cloud (Teacher)", str(teacher))
+    tbl.add_row("Basismodell", report.get("house_base", "?"))
+    tbl.add_row("Bereits trainiert", "✓" if report.get("house_trained") else "—")
+    tbl.add_row("Version", str(report.get("house_version", 0)))
+    deps = report.get("deps_missing", [])
+    tbl.add_row("Fehlende Deps", ", ".join(deps) if deps else "keine ✓")
+
+    console.print()
+    console.print(Panel(tbl,
+        title=f"[bold {_AMBER_HI}]◆ Auto-Train[/bold {_AMBER_HI}]",
+        border_style=_AMBER_DIM, box=box.HEAVY_HEAD, padding=(0, 1)))
+
+    if total < MIN:
+        console.print(
+            f"  [{_YELLOW}]●[/{_YELLOW}]  Noch [bold]{MIN - total}[/bold] Beispiele nötig "
+            f"(aktuell {total}/{MIN}).\n"
+            f"  [dim]Nutze Nexoryx weiter — jede Antwort sammelt Trainingsdaten.[/dim]"
+        )
+        return
+
+    console.print(
+        f"  [bold {_GREEN}]▶[/bold {_GREEN}]  Starte Hintergrund-Training "
+        f"[dim]({total} Beispiele)[/dim]\n"
+        f"  [dim]Du kannst die TUI jetzt schließen oder weiter nutzen.[/dim]\n"
+        f"  [dim]Telegram-Benachrichtigung bei Fertigstellung.[/dim]"
+    )
+
+    def _bg_train():
+        from ..training.train import train
+        from ..training.scheduler import _notify_telegram, _save_last_count
+        try:
+            out_dir = Path.home() / ".nexoryx" / "auto_training"
+            _notify_telegram(
+                f"🏋️ *Auto-Training gestartet* (manuell via /autotrain)\n"
+                f"Datensatz: {total} Beispiele"
+            )
+            result = train(repo_root=out_dir)
+            action = result.get("action", "?")
+            if action == "trained":
+                v = result.get("house_version", "?")
+                _notify_telegram(f"✅ *Auto-Training abgeschlossen* — Version {v}")
+                _save_last_count(total)
+            elif action == "script_generated":
+                deps_str = ", ".join(result.get("deps_missing", []))
+                _notify_telegram(
+                    f"📝 *Training-Skript erzeugt*\n"
+                    f"Fehlende Pakete: {deps_str}\n"
+                    f"{result.get('instructions', '')}"
+                )
+                _save_last_count(total)
+            elif action == "failed":
+                _notify_telegram(f"❌ *Auto-Training fehlgeschlagen*\n{result.get('error', '?')}")
+            # Upload via on_exit
+            try:
+                from ..training.on_exit import run_background
+                run_background(console=None)
+            except Exception:
+                pass
+        except Exception as exc:
+            from ..training.scheduler import _notify_telegram as _n
+            _n(f"❌ *Auto-Train Ausnahme:* {exc}")
+
+    t = threading.Thread(target=_bg_train, daemon=True, name="nexoryx-autotrain")
+    t.start()
 
 
 def _cmd_tools(console: "Console") -> None:

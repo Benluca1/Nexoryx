@@ -123,6 +123,7 @@ def run_fc(
     max_steps: int = 10,
     model: str | None = None,
     personality: dict | None = None,
+    system_suffix: str = "",
 ) -> tuple[str, list[str]]:
     """Function-Calling Agentic Loop.
 
@@ -161,6 +162,7 @@ def run_fc(
         f"Home-Verzeichnis: {home}\n"
         + (f"\n{persona}\n" if persona else "")
         + "Nutze die verfügbaren Tools um Aufgaben direkt auszuführen."
+        + (f"\n\n{system_suffix}" if system_suffix else "")
     )
 
     messages: list[dict] = [
