@@ -63,7 +63,7 @@ _SLASH = [
     "/help", "/clear", "/doctor", "/models", "/usage",
     "/memory", "/private", "/update", "/personality", "/settings",
     "/train", "/autotrain", "/tools", "/agent", "/code", "/plan", "/research",
-    "/exec", "/stats", "/search", "/about", "/admin", "/exit", "/quit",
+    "/exec", "/stats", "/search", "/about", "/admin", "/profile", "/exit", "/quit",
 ]
 
 # ── Admin-Passwort (SHA-256 Hash) ─────────────────────────────────────────────
@@ -92,16 +92,16 @@ _RESTRICTED_SYSTEM = (
 
 # ── Vorfilter für gesperrte Anfragen (ohne LLM-Call) ─────────────────────────
 _RESTRICTED_RE = _re.compile(
-    r"admin.{0,10}pass"
-    r"|wie.{0,30}(admin|administrator)\s*(werden|komm|bekomm)"
-    r"|trainings?daten\s*(zeig|export|download|les|anzeig)"
+    r"admin.{0,10}pass(wort|word)?"
+    r"|wie.{0,30}(admin|administrator).{0,20}(werden|komm|bekomm|erhalten)"
+    r"|trainings?dat(en|a)\b"
     r"|dataset\.jsonl"
     r"|memory\.db"
-    r"|\.nexoryx.{0,15}secrets"
-    r"|api.?key.{0,15}(zeig|anzeig|les)"
-    r"|github.?pat.{0,10}(zeig|anzeig)"
+    r"|\.nexoryx.{0,15}(secrets?|config)"
+    r"|api.?key.{0,15}(zeig|anzeig|les|export|download)"
+    r"|github.?pat"
     r"|chat.{0,20}aller\s+nutzer"
-    r"|nutzer.{0,20}(chat|verlauf)\s*(zeig|export|download)",
+    r"|alle.{0,10}nutzer.{0,20}(chat|verlauf|nachrichten)",
     _re.IGNORECASE | _re.DOTALL,
 )
 _REFUSAL = (
@@ -339,10 +339,13 @@ def run() -> int:
                     console, sub, parts_cmd, current_personality, profile, fc_model)
 
             elif cmd == "/admin":
-                _cmd_admin(console, arg, session_admin)
+                _cmd_admin(console, arg, session_admin, mem, cfg, home)
 
             elif cmd == "/autotrain":
                 _cmd_autotrain(console, session_admin[0])
+
+            elif cmd == "/profile":
+                _cmd_profile(console, arg, session_admin[0])
 
             else:
                 console.print(f"  [dim {_AMBER_DIM}]?[/dim {_AMBER_DIM}]  [yellow]{cmd}[/yellow]  [dim]— /help für alle Befehle[/dim]")
@@ -539,37 +542,6 @@ def _cmd_train(console: "Console") -> None:
         console.print(f"  [bold {_RED}]✗[/bold {_RED}]  Fehler: {result.get('error')}")
 
 
-def _cmd_admin(console: "Console", arg: str, session_admin: list) -> None:
-    """Admin-Login/Logout per Passwort — Sitzungs-Scope, nicht persistiert."""
-    import getpass
-    if session_admin[0]:
-        # Bereits eingeloggt → Logout
-        session_admin[0] = False
-        console.print(Panel(
-            Text("Admin-Modus deaktiviert.", style=f"bold {_AMBER}"),
-            border_style=_AMBER_DIM, box=box.ROUNDED, padding=(0, 2)))
-        return
-    console.print()
-    console.print(f"  [{_AMBER}]Admin-Login[/{_AMBER}]  [dim](Passwort eingeben, Enter zum Abbrechen)[/dim]")
-    try:
-        pw = getpass.getpass("  Passwort: ").strip()
-    except (EOFError, KeyboardInterrupt):
-        console.print("  [dim]Abgebrochen.[/dim]")
-        return
-    if not pw:
-        console.print("  [dim]Abgebrochen.[/dim]")
-        return
-    if _check_admin_pw(pw):
-        session_admin[0] = True
-        console.print(Panel(
-            Text("Admin-Modus aktiviert — alle Befehle freigeschaltet.", style=f"bold {_GREEN}"),
-            border_style=_GREEN, box=box.ROUNDED, padding=(0, 2)))
-    else:
-        console.print(Panel(
-            Text("Falsches Passwort.", style=f"bold {_RED}"),
-            border_style=_RED, box=box.ROUNDED, padding=(0, 2)))
-
-
 def _cmd_autotrain(console: "Console", is_admin: bool) -> None:
     """Startet das Hausmodell-Training im Hintergrund und kehrt sofort zurück.
 
@@ -663,6 +635,125 @@ def _cmd_autotrain(console: "Console", is_admin: bool) -> None:
 
     t = threading.Thread(target=_bg_train, daemon=True, name="nexoryx-autotrain")
     t.start()
+
+
+def _cmd_profile(console: "Console", arg: str, is_admin: bool) -> None:
+    """Zeigt Nutzer-Profil-Dateien an. Admin sieht zusätzlich interne Statistiken.
+
+    Nutzung:
+      /profile            — alle Profil-Dateien anzeigen
+      /profile add <file> <fakt>   — Fakt manuell eintragen (Admin)
+      /profile clear <file>        — Datei leeren (Admin)
+    """
+    from ..memory.persona import all_files, interest_counts, add_fact, clear_file, MEMORY_DIR, _FILE_HEADERS
+
+    parts = arg.split(maxsplit=2)
+    sub = parts[0].lower() if parts else ""
+
+    # ── Unterkommandos (nur Admin) ─────────────────────────────────────────────
+    if sub in ("add", "clear") and not is_admin:
+        console.print(Panel(
+            Text("Admin-Modus erforderlich. Zuerst /admin eingeben.", style=f"bold {_RED}"),
+            border_style=_RED, box=box.ROUNDED, padding=(0, 2)))
+        return
+
+    if sub == "add" and is_admin:
+        if len(parts) < 3:
+            console.print(f"  [dim]Nutzung: /profile add <datei> <fakt>[/dim]")
+            console.print(f"  [dim]Dateien: {', '.join(_FILE_HEADERS.keys())}[/dim]")
+            return
+        fname, fact = parts[1], parts[2]
+        if add_fact(fname, fact):
+            console.print(f"  [bold {_GREEN}]✓[/bold {_GREEN}]  '{fact}' → {fname}")
+        else:
+            console.print(f"  [bold {_RED}]✗[/bold {_RED}]  Unbekannte Datei: {fname}")
+        return
+
+    if sub == "clear" and is_admin:
+        if len(parts) < 2:
+            console.print(f"  [dim]Nutzung: /profile clear <datei>[/dim]")
+            return
+        fname = parts[1]
+        if clear_file(fname):
+            console.print(f"  [bold {_GREEN}]✓[/bold {_GREEN}]  {fname} geleert.")
+        else:
+            console.print(f"  [bold {_RED}]✗[/bold {_RED}]  Unbekannte Datei: {fname}")
+        return
+
+    # ── Profil-Dateien anzeigen ────────────────────────────────────────────────
+    console.print()
+    files = all_files()
+
+    _FILE_ICONS = {
+        "user.md":        ("👤", "Nutzer-Profil"),
+        "behavior.md":    ("⚙️ ", "Verhaltens-Regeln"),
+        "corrections.md": ("✏️ ", "Korrekturen"),
+        "interests.md":   ("🔍", "Interessen & Themen"),
+        "preferences.md": ("🎨", "Stil-Vorlieben"),
+    }
+
+    if not files:
+        console.print(Panel(
+            Text(
+                "Noch kein Profil — Nexoryx lernt automatisch beim Chatten.\n"
+                "Sage z. B.:\n"
+                "  • 'Merk dir, dass ich kurze Antworten bevorzuge'\n"
+                "  • 'Ich arbeite als Python-Entwickler'\n"
+                "  • 'Ich heiße Ben'",
+                style="dim"
+            ),
+            title=f"[{_AMBER}]◆ Nutzer-Profil[/{_AMBER}]",
+            border_style=_AMBER_DIM, box=box.ROUNDED, padding=(1, 2)))
+        return
+
+    for fname, content in files.items():
+        icon, label = _FILE_ICONS.get(fname, ("◆", fname))
+        console.print(Panel(
+            Markdown(content),
+            title=f"[bold {_AMBER}]{icon}  {label}[/bold {_AMBER}]  "
+                  f"[dim {_AMBER_DIM}]{fname}[/dim {_AMBER_DIM}]",
+            title_align="left",
+            border_style=_AMBER_DIM, box=box.HEAVY_HEAD, padding=(0, 2)))
+
+    # ── Admin-Erweiterung ──────────────────────────────────────────────────────
+    if is_admin:
+        console.print()
+        # Interessen-Zähler
+        counts = interest_counts()
+        if counts:
+            tbl = Table(box=box.SIMPLE, show_header=False, padding=(0, 2))
+            tbl.add_column(style=f"bold {_AMBER}", width=22)
+            tbl.add_column(style="white")
+            top = sorted(counts.items(), key=lambda x: -x[1])
+            for topic, cnt in top[:12]:
+                bar = "█" * min(cnt, 20) + f"  ×{cnt}"
+                tbl.add_row(topic, bar)
+            console.print(Panel(tbl,
+                title=f"[bold {_AMBER_HI}]📊  Interessen-Statistik (Admin)[/bold {_AMBER_HI}]",
+                border_style=_GREEN, box=box.HEAVY_HEAD, padding=(0, 1)))
+
+        # Datensatz-Info
+        try:
+            from ..training import dataset as _ds
+            stats = _ds.stats()
+            tbl2 = Table(box=box.SIMPLE, show_header=False, padding=(0, 2))
+            tbl2.add_column(style=_AMBER_DIM, width=22)
+            tbl2.add_column(style="white")
+            tbl2.add_row("Trainingsdaten gesamt", str(stats["total"]))
+            tbl2.add_row("  davon Cloud (Teacher)", str(stats.get("teacher", 0)))
+            tbl2.add_row("Memory-Verzeichnis", str(MEMORY_DIR))
+            console.print(Panel(tbl2,
+                title=f"[bold {_AMBER_HI}]🔧  Interne Statistiken (Admin)[/bold {_AMBER_HI}]",
+                border_style=_GREEN, box=box.HEAVY_HEAD, padding=(0, 1)))
+        except Exception:
+            pass
+
+        console.print(
+            f"  [dim]Bearbeiten:[/dim]\n"
+            f"    [bold]/profile add <datei> <fakt>[/bold]  — Eintrag hinzufügen\n"
+            f"    [bold]/profile clear <datei>[/bold]       — Datei leeren\n"
+            f"  [dim]Dateien: {', '.join(_FILE_ICONS.keys())}[/dim]"
+        )
 
 
 def _cmd_tools(console: "Console") -> None:
@@ -1153,6 +1244,198 @@ def _cmd_settings(console: "Console") -> None:
             console.print(f"  [bold {_GREEN}]✓[/bold {_GREEN}]  {label} gespeichert.\n")
         else:
             console.print(f"  [dim]Abgebrochen.[/dim]\n")
+
+
+# ── Admin-Befehle ─────────────────────────────────────────────────────────────
+
+_ADMIN_HELP_MD = """\
+## Admin-Modus aktiv
+
+| Befehl | Wirkung |
+|---|---|
+| `/admin off` | Admin-Modus beenden |
+| `/admin chats` | Alle Chat-Daten exportieren (JSONL) |
+| `/admin training` | Trainingsdaten-Detail + Export |
+| `/admin models` | Modellverwaltung |
+| `/admin users` | Telegram-Nutzer verwalten |
+| `/exec <cmd>` | Shell ohne Sandbox-Einschränkung |
+"""
+
+
+def _cmd_admin(console: "Console", arg: str, session_admin: list, mem, cfg, home: str) -> None:
+    import getpass
+    sub = arg.strip().lower()
+
+    if session_admin[0]:
+        if sub == "off":
+            session_admin[0] = False
+            console.print(Panel(
+                Text("Admin-Modus beendet.", style=f"bold {_AMBER}"),
+                border_style=_AMBER_DIM, box=box.ROUNDED, padding=(0, 2)))
+            return
+        if sub == "chats":
+            _cmd_admin_chats(console)
+            return
+        if sub == "training":
+            _cmd_admin_training(console)
+            return
+        if sub == "models":
+            import argparse
+            from .. import cli as _cli
+            console.print()
+            _cli.cmd_models(argparse.Namespace(models_action="list"))
+            return
+        if sub == "users":
+            _cmd_admin_users(console, cfg)
+            return
+        console.print()
+        console.print(Panel(
+            Markdown(_ADMIN_HELP_MD),
+            title=f"[bold red]◆ ADMIN[/bold red]",
+            border_style="red", box=box.HEAVY_HEAD, padding=(1, 2)))
+        return
+
+    # Login
+    console.print()
+    console.print(Panel(
+        Text("Admin-Authentifizierung erforderlich.", style=f"bold {_AMBER_HI}"),
+        border_style="red", box=box.HEAVY_HEAD, padding=(0, 2)))
+    try:
+        pw = getpass.getpass("  Passwort: ")
+    except (EOFError, KeyboardInterrupt):
+        console.print("  [dim]Abgebrochen.[/dim]")
+        return
+    if _check_admin_pw(pw):
+        session_admin[0] = True
+        console.print(Panel(
+            Text("Admin-Modus aktiviert. /admin off zum Beenden.", style=f"bold {_GREEN}"),
+            border_style="red", box=box.HEAVY_HEAD, padding=(0, 2)))
+        console.print()
+        console.print(Panel(
+            Markdown(_ADMIN_HELP_MD),
+            title=f"[bold red]◆ ADMIN-BEFEHLE[/bold red]",
+            border_style="red", box=box.ROUNDED, padding=(1, 2)))
+    else:
+        console.print(Panel(
+            Text("Falsches Passwort.", style=f"bold {_RED}"),
+            border_style=_RED, box=box.ROUNDED, padding=(0, 2)))
+
+
+def _cmd_admin_chats(console: "Console") -> None:
+    import json
+    import time
+    from pathlib import Path
+    from ..training.dataset import iter_examples
+
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    out_path = Path.home() / f"nexoryx_chats_{ts}.jsonl"
+
+    console.print()
+    with console.status(
+        f"[bold red]◆[/bold red]  [dim]Exportiere Chats …[/dim]",
+        spinner="dots2", spinner_style="red",
+    ):
+        lines = 0
+        try:
+            with open(out_path, "w", encoding="utf-8") as fh:
+                for ex in iter_examples():
+                    fh.write(json.dumps({"source": "dataset", **ex}, ensure_ascii=False) + "\n")
+                    lines += 1
+                repo_data = Path(__file__).resolve().parents[4] / "training" / "data"
+                if repo_data.exists():
+                    for jsonl in sorted(repo_data.glob("*.jsonl")):
+                        device = jsonl.stem
+                        try:
+                            for line in jsonl.read_text(encoding="utf-8").splitlines():
+                                line = line.strip()
+                                if not line:
+                                    continue
+                                ex = json.loads(line)
+                                fh.write(json.dumps(
+                                    {"source": f"device:{device}", **ex},
+                                    ensure_ascii=False) + "\n")
+                                lines += 1
+                        except Exception:
+                            pass
+        except Exception as exc:
+            console.print(f"  [bold {_RED}]✗  Fehler:[/bold {_RED}]  {exc}")
+            return
+
+    tbl = Table(box=box.SIMPLE, show_header=False, padding=(0, 2))
+    tbl.add_column(style=_AMBER_DIM, width=20)
+    tbl.add_column(style="white")
+    tbl.add_row("Exportiert", f"{lines} Einträge")
+    tbl.add_row("Datei", str(out_path))
+    tbl.add_row("Format", "JSONL (ChatML)")
+    console.print(Panel(tbl,
+        title=f"[bold red]◆  Chat-Export[/bold red]",
+        border_style="red", box=box.HEAVY_HEAD, padding=(0, 1)))
+
+
+def _cmd_admin_training(console: "Console") -> None:
+    from ..training.dataset import stats, export_chatml
+    import time
+    from pathlib import Path
+
+    console.print()
+    st = stats()
+
+    tbl = Table(box=box.SIMPLE, show_header=False, padding=(0, 2))
+    tbl.add_column(style=_AMBER_DIM, width=22)
+    tbl.add_column(style="white")
+    tbl.add_row("Gesamt", str(st["total"]))
+    tbl.add_row("Cloud (teacher)", str(st["teacher"]))
+    tbl.add_row("Lokal", str(st["total"] - st["teacher"]))
+    tbl.add_row("Dateigröße", f"{st['bytes']:,} Bytes")
+    tbl.add_row("Pfad", st["path"])
+    for prov, n in st.get("by_provider", {}).items():
+        tbl.add_row(f"  {prov}", str(n))
+
+    repo_data = Path(__file__).resolve().parents[4] / "training" / "data"
+    device_files = sorted(repo_data.glob("*.jsonl")) if repo_data.exists() else []
+    if device_files:
+        tbl.add_row("Geräte-Dateien", str(len(device_files)))
+        for f in device_files:
+            try:
+                n_lines = sum(1 for ln in f.open(encoding="utf-8") if ln.strip())
+            except Exception:
+                n_lines = 0
+            tbl.add_row(f"  {f.stem}", f"{n_lines} Einträge")
+
+    console.print(Panel(tbl,
+        title=f"[bold red]◆  Trainingsdaten (Admin)[/bold red]",
+        border_style="red", box=box.HEAVY_HEAD, padding=(0, 1)))
+
+    try:
+        choice = console.input(
+            f"  [dim]Export als ChatML-JSONL? [[bold]j[/bold]/n]:[/dim]  "
+        ).strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        return
+    if choice in ("j", "ja", "y", "yes", ""):
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        out = Path.home() / f"nexoryx_training_{ts}.jsonl"
+        n = export_chatml(str(out))
+        console.print(f"  [bold {_GREEN}]✓[/bold {_GREEN}]  {n} Beispiele → {out}")
+
+
+def _cmd_admin_users(console: "Console", cfg) -> None:
+    from ..platform import config as cfg_mod
+    console.print()
+    tbl = Table(box=box.SIMPLE, show_header=True, padding=(0, 2))
+    tbl.add_column("Telegram-ID", style=_AMBER, width=18)
+    tbl.add_column("Rolle", style="white", width=12)
+    if cfg.telegram_admin_id:
+        tbl.add_row(str(cfg.telegram_admin_id), "admin (config)")
+    for uid, role in sorted(cfg.telegram_allowlist.items()):
+        tbl.add_row(uid, role)
+    console.print(Panel(tbl,
+        title=f"[bold red]◆  Telegram-Nutzer[/bold red]",
+        border_style="red", box=box.HEAVY_HEAD, padding=(0, 1)))
+    console.print(
+        f"  [dim]Nutzer hinzufügen:[/dim]  "
+        f"[bold]nexoryx admin user add <id> user|guest|admin[/bold]"
+    )
 
 
 # ── Fallback ohne Rich ────────────────────────────────────────────────────────

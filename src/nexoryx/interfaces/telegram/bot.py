@@ -42,9 +42,10 @@ HELP = """\
 /exec <cmd> — Shell in Sandbox (nur Admin)
 /search <query> — Web-Suche
 
-*Speicher*
+*Speicher & Profil*
 /memory [query] — Speicher anzeigen/suchen
 /forget <query> — Erinnerungen löschen
+/profile — Nutzer-Profil anzeigen (Interessen, Vorlieben, …)
 
 *System*
 /status — System-Status
@@ -476,6 +477,41 @@ def _handle(token, chat_id, user_id, first_name, role, text, orch, memory, priva
         from ...agents import AGENTS
         names = "\n".join(f"• `{n}`" for n in AGENTS)
         _send(token, chat_id, f"🤖 *Agenten:*\n\n{names}", parse_mode="Markdown")
+
+    elif cmd == "profile":
+        try:
+            from ...memory.persona import all_files, interest_counts
+            files = all_files()
+            if not files:
+                _send(token, chat_id,
+                      "📋 Noch kein Profil gespeichert.\n"
+                      "Nexoryx lernt automatisch beim Chatten — sag z.B.:\n"
+                      "• 'Merk dir, dass ich kurze Antworten bevorzuge'\n"
+                      "• 'Ich arbeite als Entwickler'")
+                return
+            parts_out = ["📋 *Nutzer-Profil*\n"]
+            _icons = {
+                "user.md": "👤", "behavior.md": "⚙️", "corrections.md": "✏️",
+                "interests.md": "🔍", "preferences.md": "🎨",
+            }
+            for fname, content in files.items():
+                icon = _icons.get(fname, "◆")
+                label = fname.replace(".md", "").replace("_", " ").capitalize()
+                # Nur Bullet-Zeilen extrahieren, Header-Zeilen weglassen
+                lines = [l for l in content.splitlines() if l.startswith("- ")]
+                if lines:
+                    parts_out.append(f"{icon} *{label}*\n" + "\n".join(lines[:8]))
+            out = "\n\n".join(parts_out)
+            # Admin: Interessen-Statistik anhängen
+            if role in ("admin", "owner"):
+                counts = interest_counts()
+                if counts:
+                    top = sorted(counts.items(), key=lambda x: -x[1])[:8]
+                    stat_lines = "\n".join(f"• {t}: ×{c}" for t, c in top)
+                    out += f"\n\n📊 *Interessen-Statistik (Admin)*\n{stat_lines}"
+            _send(token, chat_id, out[:4000], parse_mode="Markdown")
+        except Exception as exc:
+            _send(token, chat_id, f"❌ Fehler: {exc}")
 
     elif cmd == "cancel":
         _send(token, chat_id, "⛔ Abgebrochen.")
