@@ -1,8 +1,8 @@
 """Nexoryx TUI — interaktive Oberfläche (startet bei nacktem `nexoryx`/`nex`).
 
-Nutzt Olamas OpenAI-kompatiblen Endpunkt (openclaw) + hermes3 für native
-Function Calls. Jede Nachricht geht durch denselben Kanal — das Modell
-entscheidet selbst ob es Tools braucht oder direkt antwortet.
+Nutzt Ollamas OpenAI-kompatiblen Endpunkt + hermes3 für native Function Calls.
+Jede Nachricht geht durch denselben Kanal — das Modell entscheidet selbst ob
+es Tools braucht oder direkt antwortet.
 """
 from __future__ import annotations
 import sys
@@ -12,11 +12,13 @@ try:
     from rich.panel import Panel
     from rich.markdown import Markdown
     from rich.text import Text
+    from rich.columns import Columns
     from rich.live import Live
     from rich.rule import Rule
     from rich.align import Align
     from rich.table import Table
     from rich import box
+    from rich.padding import Padding
     HAS_RICH = True
 except ImportError:
     HAS_RICH = False
@@ -37,51 +39,80 @@ _AMBER_HI  = "#F5C242"
 _SLATE     = "#5F7FA8"
 _SLATE_DIM = "#3A5068"
 _GREEN     = "#4CAF50"
+_RED       = "#E05252"
 _YELLOW    = "#F5C242"
+_CYAN      = "#4DB6C8"
+_PURPLE    = "#8B7EC8"
 
 # ── Maskottchen ───────────────────────────────────────────────────────────────
-# Nexo — stilisierter Oryx-Roboter (Hörner oben, Schaltkreis-Gesicht)
 _MASCOT = [
-    #  idx  content                   bright?
-    (False, "       │     │       "),
-    (False, "       │     │       "),
-    (True,  "  ╔════╧═════╧════╗  "),
-    (True,  "  ║   ◈       ◈   ║  "),
-    (False, "  ║     ╭───╮     ║  "),
-    (True,  "  ║     │ N │     ║  "),
-    (False, "  ║     ╰───╯     ║  "),
-    (True,  "  ╚═══════════════╝  "),
+    (False, "      │ │ │ │      "),
+    (False, "      │ │ │ │      "),
+    (True,  " ╔════╧═╧═╧═╧════╗ "),
+    (True,  " ║  ◈         ◈  ║ "),
+    (False, " ║    ╭──┬──╮    ║ "),
+    (True,  " ║    │ N│X │    ║ "),
+    (False, " ║    ╰──┴──╯    ║ "),
+    (True,  " ╚═══════════════╝ "),
+    (False, "   ╱           ╲   "),
+    (False, "  ╱  ╔═══════╗  ╲  "),
+    (False, " ▔▔▔ ╚═══════╝ ▔▔▔ "),
 ]
 
 _SLASH = [
     "/help", "/clear", "/doctor", "/models", "/usage",
-    "/memory", "/private", "/update", "/personality", "/settings", "/exit", "/quit",
+    "/memory", "/private", "/update", "/personality", "/settings",
+    "/train", "/tools", "/agent", "/code", "/plan", "/research",
+    "/exec", "/stats", "/search", "/about", "/exit", "/quit",
 ]
 
 _HELP_MD = """\
+## Allgemein
 Einfach schreiben — Nexoryx erledigt es direkt.
 
 **Beispiele**
 - *Erstelle einen Ordner Musik auf dem Desktop*
-- *Öffne Firefox*
-- *Zeige mir alle Dateien im Home-Verzeichnis*
-- *Schreibe eine Datei notiz.txt mit dem Text Hallo*
-- *Was ist der Unterschied zwischen RAM und SSD?*
+- *Schreibe mir ein Python-Skript das Dateien sortiert*
+- *Recherchiere: Was ist der Unterschied zwischen Ollama und llama.cpp?*
+- *Zeige mir alle laufenden Prozesse und beende Port 8080*
 
-**Befehle**
+---
+
+## Befehle
 
 | Befehl | Wirkung |
 |---|---|
 | `/help` | Diese Hilfe |
+| `/clear` | Chat-Verlauf leeren |
 | `/settings` | API-Keys & Einstellungen verwalten |
-| `/personality` | Persönlichkeit wechseln / erstellen |
-| `/clear` | Chat leeren |
-| `/private` | Privat-Modus (nur lokal) |
-| `/memory` | Letzte Erinnerungen |
-| `/doctor` | Hardware + Profil prüfen |
-| `/models` | Verfügbare Modelle |
-| `/update` | Auf neuste Version aktualisieren |
-| `/exit` | Beenden |
+| `/personality [name]` | Persönlichkeit wechseln / erstellen |
+| `/private` | Privat-Modus umschalten (nur lokale Modelle) |
+| `/memory [query]` | Letzte Erinnerungen anzeigen / suchen |
+| `/doctor` | Hardware + Profil-Check |
+| `/models` | Verfügbare Modelle auflisten |
+| `/usage` | API-Kosten und Token-Verbrauch |
+| `/stats` | Sitzungs-Statistiken |
+| `/about` | Über Nexoryx |
+
+## KI-Befehle
+
+| Befehl | Wirkung |
+|---|---|
+| `/code <aufgabe>` | Coding-Agent (spezialisiert) |
+| `/plan <aufgabe>` | Planungs-Agent |
+| `/research <frage>` | Recherche-Agent mit Web-Suche |
+| `/agent <name> <aufgabe>` | Spezifischen Agenten wählen |
+| `/search <query>` | Web-Suche (ohne KI-Antwort) |
+| `/exec <cmd>` | Shell-Befehl (Admin) |
+
+## Modell & Training
+
+| Befehl | Wirkung |
+|---|---|
+| `/train` | Hausmodell-Training auslösen |
+| `/tools` | Verfügbare Tools auflisten |
+| `/update` | Nexoryx auf neuste Version aktualisieren |
+| `/exit` | Beenden (speichert Lernstand) |
 """
 
 
@@ -112,23 +143,26 @@ def run() -> int:
         return _run_plain(router, mem, cfg, profile)
 
     console = Console()
-    _msg_counter = [0]  # mutable für Closure
+    _session_stats = {"msgs": 0, "steps": 0, "start": _ts_full()}
+    private = [False]
+
     _banner(console, profile, fc_model, current_personality)
 
     history: list[str] = []
-    private = False
 
     if HAS_PT:
-        _session: PromptSession = PromptSession(
+        _pt_session: PromptSession = PromptSession(
             completer=WordCompleter(_SLASH, sentence=True),
             history=InMemoryHistory(),
             style=PTStyle.from_dict({"prompt": f"bold {_AMBER}"}),
         )
 
     def _get_input() -> str:
+        mode_indicator = "🔒 " if private[0] else ""
+        prompt_str = f"\n  {mode_indicator}▸  "
         if HAS_PT:
-            return _session.prompt("\n  ▸  ").strip()
-        return console.input(f"\n  [bold {_AMBER}]▸[/bold {_AMBER}]  ").strip()
+            return _pt_session.prompt(prompt_str).strip()
+        return console.input(f"\n  [bold {_AMBER}]{mode_indicator}▸[/bold {_AMBER}]  ").strip()
 
     while True:
         try:
@@ -136,7 +170,7 @@ def run() -> int:
         except (EOFError, KeyboardInterrupt):
             console.print()
             console.rule("[dim]Auf Wiedersehen[/dim]", style=_AMBER_DIM)
-            _on_exit(console, history)
+            _on_exit(console, history, _session_stats)
             console.print()
             return 0
 
@@ -145,11 +179,13 @@ def run() -> int:
 
         # ── Slash-Befehle ──────────────────────────────────────────────────────
         if user.startswith("/"):
-            cmd = user.split()[0].lower()
+            parts = user.split(maxsplit=1)
+            cmd = parts[0].lower()
+            arg = parts[1].strip() if len(parts) > 1 else ""
 
             if cmd in ("/exit", "/quit"):
                 console.rule("[dim]Auf Wiedersehen[/dim]", style=_AMBER_DIM)
-                _on_exit(console, history)
+                _on_exit(console, history, _session_stats)
                 console.print()
                 return 0
 
@@ -161,11 +197,14 @@ def run() -> int:
                 console.print()
                 console.print(Panel(
                     Markdown(_HELP_MD),
-                    title=f"[{_AMBER}]● Hilfe[/{_AMBER}]",
+                    title=f"[bold {_AMBER_HI}]◆ NEXORYX[/bold {_AMBER_HI}]  [dim {_AMBER_DIM}]Hilfe[/dim {_AMBER_DIM}]",
                     border_style=_AMBER_DIM,
-                    box=box.ROUNDED,
+                    box=box.HEAVY_HEAD,
                     padding=(1, 2),
                 ))
+
+            elif cmd == "/about":
+                _cmd_about(console, profile, hw, fc_model)
 
             elif cmd == "/doctor":
                 import argparse
@@ -185,22 +224,34 @@ def run() -> int:
                 console.print()
                 _cli.cmd_usage(argparse.Namespace())
 
+            elif cmd == "/stats":
+                _cmd_stats(console, _session_stats, private[0], fc_model)
+
             elif cmd == "/memory":
                 console.print()
-                entries = mem.recent(10)
+                entries = mem.recall(arg, limit=10) if arg else mem.recent(10)
                 if entries:
+                    tbl = Table(box=box.SIMPLE, show_header=False, padding=(0, 1))
+                    tbl.add_column(style=_AMBER_DIM, width=8)
+                    tbl.add_column(style="white")
                     for m in entries:
-                        c = _AMBER if m.scope == "long" else "dim"
-                        console.print(f"  [dim]·[/dim] [{c}]{m.scope}[/{c}]  {m.text[:140]}")
+                        tbl.add_row(m.scope, m.text[:160])
+                    console.print(Panel(tbl,
+                        title=f"[{_AMBER}]◆ Erinnerungen[/{_AMBER}]",
+                        border_style=_AMBER_DIM, box=box.ROUNDED, padding=(0, 1)))
                 else:
                     console.print("  [dim](keine Erinnerungen)[/dim]")
 
             elif cmd == "/private":
-                private = not private
-                if private:
-                    console.print(f"  [green]🔒  Privat-Modus AN[/green]  [dim]— nur lokale Modelle[/dim]")
+                private[0] = not private[0]
+                if private[0]:
+                    console.print(Panel(
+                        Text("Privat-Modus AN — nur lokale Modelle, kein Cloud-Upload", style=f"bold {_GREEN}"),
+                        border_style=_GREEN, box=box.ROUNDED, padding=(0, 2)))
                 else:
-                    console.print(f"  [{_AMBER}]🌐  Privat-Modus AUS[/{_AMBER}]  [dim]— Cloud erlaubt[/dim]")
+                    console.print(Panel(
+                        Text(f"Privat-Modus AUS — Cloud-Modelle erlaubt", style=f"bold {_AMBER}"),
+                        border_style=_AMBER_DIM, box=box.ROUNDED, padding=(0, 2)))
 
             elif cmd == "/update":
                 console.print()
@@ -210,61 +261,37 @@ def run() -> int:
                 console.print()
                 _cmd_settings(console)
 
+            elif cmd == "/train":
+                console.print()
+                _cmd_train(console)
+
+            elif cmd == "/tools":
+                console.print()
+                _cmd_tools(console)
+
+            elif cmd == "/search":
+                if not arg:
+                    console.print("  [dim]Nutzung: /search <suchbegriff>[/dim]")
+                else:
+                    _cmd_search(console, arg, home, cfg)
+
+            elif cmd == "/exec":
+                _cmd_exec(console, arg, cfg, home)
+
+            elif cmd in ("/code", "/plan", "/research", "/debug"):
+                _cmd_agent_mode(console, cmd.lstrip("/"), arg or "", mem, router, history, private[0], cfg, home, _session_stats)
+
+            elif cmd == "/agent":
+                _cmd_agent_named(console, arg, mem, router, history, private[0], cfg, home, _session_stats)
+
             elif cmd == "/personality":
                 parts_cmd = user.split(maxsplit=2)
                 sub = parts_cmd[1].lower() if len(parts_cmd) > 1 else ""
-
-                if not sub or sub == "list":
-                    _cmd_personality_list(console, current_personality)
-
-                elif sub == "switch" and len(parts_cmd) > 2:
-                    target = parts_cmd[2].strip()
-                    p = get_personality(target)
-                    if p:
-                        current_personality = p
-                        _banner(console, profile, fc_model, current_personality)
-                        console.print(f"  [{_AMBER}]◆  Persönlichkeit: {p['display_name']}[/{_AMBER}]")
-                    else:
-                        console.print(f"  [yellow]Unbekannt:[/yellow] '{target}'  —  /personality list")
-
-                elif sub == "default" and len(parts_cmd) > 2:
-                    from ..memory.personalities import set_default as _set_def
-                    name = parts_cmd[2].strip()
-                    if _set_def(name):
-                        console.print(f"  [green]✓[/green] Standard gesetzt: {name}")
-                    else:
-                        console.print(f"  [red]✗[/red] Nicht gefunden: {name}")
-
-                elif sub == "create":
-                    current_personality = _cmd_personality_create(console)
-
-                elif sub == "delete" and len(parts_cmd) > 2:
-                    from ..memory.personalities import delete as _del
-                    name = parts_cmd[2].strip()
-                    if _del(name):
-                        console.print(f"  [green]✓[/green] Gelöscht: {name}")
-                    else:
-                        console.print(f"  [red]✗[/red] Nicht löschbar: {name}")
-
-                else:
-                    # Direkt nach Name suchen
-                    p = get_personality(sub)
-                    if p:
-                        current_personality = p
-                        _banner(console, profile, fc_model, current_personality)
-                        console.print(f"  [{_AMBER}]◆  Persönlichkeit: {p['display_name']}[/{_AMBER}]")
-                    else:
-                        console.print(
-                            f"  [dim]Nutzung:[/dim]\n"
-                            f"    [bold]/personality list[/bold]         — alle anzeigen\n"
-                            f"    [bold]/personality <name>[/bold]        — wechseln\n"
-                            f"    [bold]/personality create[/bold]        — neue erstellen\n"
-                            f"    [bold]/personality default <name>[/bold] — Standard setzen\n"
-                            f"    [bold]/personality delete <name>[/bold]  — löschen"
-                        )
+                current_personality = _handle_personality(
+                    console, sub, parts_cmd, current_personality, profile, fc_model)
 
             else:
-                console.print(f"  [yellow]?[/yellow]  {cmd}  [dim]— /help für Übersicht[/dim]")
+                console.print(f"  [dim {_AMBER_DIM}]?[/dim {_AMBER_DIM}]  [yellow]{cmd}[/yellow]  [dim]— /help für alle Befehle[/dim]")
 
             continue
 
@@ -284,9 +311,10 @@ def run() -> int:
             console.print()
             t = Text()
             t.append(f"  {cmd_str}", style="bold white", overflow="fold")
+            icon = _STEP_ICONS.get(tool.name, "◆")
             console.print(Panel(
                 t,
-                title=f"[bold {_YELLOW}]⚡  {tool.name}[/bold {_YELLOW}]  [dim]Bestätigung nötig[/dim]",
+                title=f"[bold {_YELLOW}]{icon}  {tool.name}[/bold {_YELLOW}]  [dim]Bestätigung nötig[/dim]",
                 title_align="left",
                 border_style=_YELLOW,
                 box=box.HEAVY,
@@ -306,26 +334,19 @@ def run() -> int:
                 console.print(f"  [dim]✗  Übersprungen[/dim]")
             return ok
 
-        _STEP_ICONS = {
-            "terminal":   "⚡",
-            "fs_read":    "◎",
-            "fs_write":   "✎",
-            "web_search": "◌",
-        }
-
         def on_step(name: str, args: dict) -> None:
             icon   = _STEP_ICONS.get(name, "◆")
             detail = args.get("command") or args.get("query") or args.get("path") or ""
             t = Text()
             t.append(f"  {icon} ", style=f"bold {_AMBER}")
-            t.append(name, style=_AMBER_DIM)
+            t.append(f"{name}", style=_AMBER_DIM)
             t.append("  ", style="")
             t.append(str(detail)[:90], style="dim")
             console.print(t)
 
         console.print()
+        pdisp = current_personality.get("display_name", "Nexoryx") if current_personality else "Nexoryx"
         try:
-            pdisp = current_personality.get("display_name", "Nexoryx") if current_personality else "Nexoryx"
             with console.status(
                 f"[bold {_AMBER}]◆[/bold {_AMBER}]  [{_AMBER_DIM}]{pdisp} denkt …[/{_AMBER_DIM}]",
                 spinner="dots2",
@@ -338,22 +359,22 @@ def run() -> int:
                     model=fc_model,
                     personality=current_personality,
                 )
-        except RuntimeError as exc:
-            # FC nicht verfügbar → normaler Chat-Fallback
-            answer, steps = _chat_fallback(router, user, history, mem, cfg, private), []
+        except RuntimeError:
+            answer = _chat_fallback(router, user, history, mem, cfg, private[0])
+            steps = []
         except Exception as exc:
-            console.print(f"\n  [red]● Fehler:[/red] {exc}\n")
+            console.print(f"\n  [bold {_RED}]● Fehler:[/bold {_RED}]  [dim]{exc}[/dim]\n")
             continue
 
+        _session_stats["msgs"] += 1
+        _session_stats["steps"] += len(steps)
         n = len(steps)
-        _msg_counter[0] += 1
         step_txt = f" · {n} Schritt{'e' if n != 1 else ''}" if n else ""
-        label = f"{fc_model or 'chat'}{step_txt} · #{_msg_counter[0]}"
+        label = f"{fc_model or 'chat'}{step_txt} · #{_session_stats['msgs']}"
         _print_bot(console, answer, label=label)
         history.extend([f"User: {user}", f"Nexoryx: {answer[:300]}"])
         mem.remember(f"Chat: {user} → {answer[:200]}", scope="long")
 
-        # Persona aus diesem Turn lernen
         try:
             from ..memory.persona import learn_from_turn
             learn_from_turn(user, answer)
@@ -382,27 +403,293 @@ def _chat_fallback(router, user: str, history: list, mem, cfg, private: bool) ->
         return f"Fehler: {exc}"
 
 
+# ── Slash-Befehl Implementierungen ────────────────────────────────────────────
+
+def _cmd_about(console: "Console", profile, hw, fc_model: str | None) -> None:
+    tbl = Table(box=box.SIMPLE, show_header=False, padding=(0, 2))
+    tbl.add_column(style=_AMBER_DIM, width=18)
+    tbl.add_column(style="white")
+    tbl.add_row("Version", "0.0.1")
+    tbl.add_row("Profil", profile.name)
+    tbl.add_row("CPU", hw.cpu_model[:40])
+    tbl.add_row("RAM", f"{hw.ram_mb} MB")
+    tbl.add_row("GPU", hw.gpu.vendor)
+    tbl.add_row("Aktives Modell", fc_model or "—")
+    tbl.add_row("GitHub", "github.com/Benluca1/Nexoryx")
+    console.print()
+    console.print(Panel(tbl,
+        title=f"[bold {_AMBER_HI}]◆ NEXORYX[/bold {_AMBER_HI}]",
+        border_style=_AMBER_DIM, box=box.HEAVY_HEAD, padding=(0, 1)))
+
+
+def _cmd_stats(console: "Console", stats: dict, private: bool, fc_model: str | None) -> None:
+    tbl = Table(box=box.SIMPLE, show_header=False, padding=(0, 2))
+    tbl.add_column(style=_AMBER_DIM, width=20)
+    tbl.add_column(style="white")
+    tbl.add_row("Sitzung gestartet", stats.get("start", "—"))
+    tbl.add_row("Nachrichten", str(stats.get("msgs", 0)))
+    tbl.add_row("Tool-Schritte", str(stats.get("steps", 0)))
+    tbl.add_row("Modell", fc_model or "—")
+    tbl.add_row("Privat-Modus", "AN 🔒" if private else "AUS")
+    console.print()
+    console.print(Panel(tbl,
+        title=f"[{_AMBER}]◆ Sitzungs-Statistiken[/{_AMBER}]",
+        border_style=_AMBER_DIM, box=box.ROUNDED, padding=(0, 1)))
+
+
+def _cmd_train(console: "Console") -> None:
+    from ..training.train import train, train_report
+    from pathlib import Path
+    report = train_report()
+    total = report["dataset"]["total"]
+    MIN = 50
+
+    info = Text()
+    info.append(f"  Datensatz:  ", style=_AMBER_DIM)
+    info.append(f"{total} Beispiele", style="white")
+    info.append(f"  (min. {MIN} für Training)\n", style="dim")
+    info.append(f"  Basismodell: ", style=_AMBER_DIM)
+    info.append(report.get("house_base", "?"), style="white")
+    console.print(Panel(info,
+        title=f"[{_AMBER}]◆ Hausmodell-Training[/{_AMBER}]",
+        border_style=_AMBER_DIM, box=box.ROUNDED, padding=(0, 1)))
+
+    if total < MIN:
+        console.print(f"  [dim]Noch {MIN - total} Beispiele nötig — nutze Nexoryx weiter.[/dim]")
+        return
+
+    console.print(f"  [{_AMBER}]Starte Training …[/{_AMBER}]  [dim](kann mehrere Minuten dauern)[/dim]")
+    with console.status(
+        f"[bold {_AMBER}]◆[/bold {_AMBER}]  [{_AMBER_DIM}]Trainiere Hausmodell …[/{_AMBER_DIM}]",
+        spinner="dots2", spinner_style=_AMBER_HI,
+    ):
+        result = train(Path.cwd() / "training")
+
+    action = result.get("action", "?")
+    if action == "trained":
+        console.print(f"  [bold {_GREEN}]✓[/bold {_GREEN}]  Training abgeschlossen — Version {result.get('house_version')}")
+    elif action == "script_generated":
+        console.print(f"  [{_YELLOW}]◆[/{_YELLOW}]  Skript erzeugt: {result.get('script')}")
+        console.print(f"  [dim]Fehlende Deps: {', '.join(result.get('deps_missing', []))}[/dim]")
+        console.print(f"  [dim]{result.get('instructions', '')}[/dim]")
+    elif action == "skipped":
+        console.print(f"  [dim]{result.get('reason', 'Übersprungen.')}[/dim]")
+    elif action == "failed":
+        console.print(f"  [bold {_RED}]✗[/bold {_RED}]  Fehler: {result.get('error')}")
+
+
+def _cmd_tools(console: "Console") -> None:
+    from ..tools.registry import _REGISTRY
+    tbl = Table(box=box.SIMPLE, show_header=True, padding=(0, 1))
+    tbl.add_column("Tool", style=f"bold {_AMBER}", width=16)
+    tbl.add_column("Berechtigung", style=_AMBER_DIM, width=12)
+    tbl.add_column("Beschreibung", style="white")
+    try:
+        for name, entry in sorted(_REGISTRY.items()):
+            tool = entry["tool"]
+            perm = getattr(tool, "permission_level", "auto")
+            desc = getattr(tool, "description", "")
+            tbl.add_row(name, perm, desc[:60])
+    except Exception:
+        tbl.add_row("terminal", "confirm", "Shell-Befehl in Sandbox")
+        tbl.add_row("fs_read", "auto", "Datei lesen")
+        tbl.add_row("fs_write", "confirm", "Datei schreiben")
+        tbl.add_row("web_search", "auto", "DuckDuckGo-Suche")
+        tbl.add_row("http_fetch", "auto", "URL abrufen")
+        tbl.add_row("glob", "auto", "Dateien nach Muster suchen")
+        tbl.add_row("grep", "auto", "Regex-Suche in Dateien")
+        tbl.add_row("git", "auto", "Git (read-only)")
+    console.print(Panel(tbl,
+        title=f"[{_AMBER}]◆ Verfügbare Tools[/{_AMBER}]",
+        border_style=_AMBER_DIM, box=box.HEAVY_HEAD, padding=(0, 1)))
+
+
+def _cmd_search(console: "Console", query: str, home: str, cfg) -> None:
+    import os
+    from ..tools import ToolContext
+    ctx = ToolContext(role=cfg.role, project_root=home, actor="tui", auto_approve=True)
+    console.print()
+    with console.status(
+        f"[bold {_AMBER}]◆[/bold {_AMBER}]  [{_AMBER_DIM}]Suche: {query[:50]} …[/{_AMBER_DIM}]",
+        spinner="dots2", spinner_style=_AMBER_HI,
+    ):
+        try:
+            from ..tools.web import WebSearch
+            ws = WebSearch()
+            result = ws.run({"query": query}, ctx)
+            text = result.output or "(keine Ergebnisse)"
+        except Exception as exc:
+            text = f"Fehler: {exc}"
+    console.print(Panel(
+        Markdown(text[:3000]),
+        title=f"[{_AMBER}]◆ Suche: {query[:50]}[/{_AMBER}]",
+        border_style=_AMBER_DIM, box=box.ROUNDED, padding=(1, 2)))
+
+
+def _cmd_exec(console: "Console", cmd_str: str, cfg, home: str) -> None:
+    if cfg.role not in ("admin", "owner"):
+        console.print(Panel(
+            Text("Nur Admins dürfen /exec nutzen.", style=f"bold {_RED}"),
+            border_style=_RED, box=box.ROUNDED, padding=(0, 2)))
+        return
+    if not cmd_str:
+        console.print("  [dim]Nutzung: /exec <befehl>[/dim]")
+        return
+    from ..tools import ToolContext
+    from ..orchestrator import Orchestrator
+    from ..platform import detect, choose_profile
+    from ..memory import MemoryStore
+    hw = detect(); profile = choose_profile(hw)
+    mem = MemoryStore()
+    orch = Orchestrator(hw, profile, memory=mem)
+    ctx = ToolContext(role=cfg.role, project_root=home, actor="tui:exec", auto_approve=True)
+    with console.status(
+        f"[bold {_YELLOW}]⚡[/bold {_YELLOW}]  [{_AMBER_DIM}]Führe aus: {cmd_str[:60]}[/{_AMBER_DIM}]",
+        spinner="dots2", spinner_style=_YELLOW,
+    ):
+        result = orch.exec_command(cmd_str, ctx)
+    body = result.output or result.error or "(keine Ausgabe)"
+    color = _GREEN if result.ok else _RED
+    icon = "✓" if result.ok else "✗"
+    console.print(Panel(
+        Text(body[:3000]),
+        title=f"[bold {color}]{icon}  {cmd_str[:50]}[/bold {color}]",
+        border_style=color, box=box.ROUNDED, padding=(0, 2)))
+
+
+def _cmd_agent_mode(console: "Console", mode: str, task: str, mem, router, history, private: bool, cfg, home: str, stats: dict) -> None:
+    _LABELS = {
+        "code": (f"[bold {_CYAN}]⟨/⟩[/bold {_CYAN}]", "Coder", "coding"),
+        "plan": (f"[bold {_PURPLE}]◈[/bold {_PURPLE}]", "Planner", "reasoning"),
+        "research": (f"[bold {_SLATE}]◌[/bold {_SLATE}]", "Research", "research"),
+        "debug": (f"[bold {_YELLOW}]⚡[/bold {_YELLOW}]", "Debug", "coding"),
+    }
+    icon, label, task_type = _LABELS.get(mode, (f"[{_AMBER}]◆[/{_AMBER}]", mode.capitalize(), "chat"))
+
+    if not task:
+        console.print(f"  [dim]Nutzung: /{mode} <aufgabe>[/dim]")
+        return
+
+    _print_user(console, task)
+    console.print()
+    with console.status(
+        f"{icon}  [{_AMBER_DIM}]{label} arbeitet …[/{_AMBER_DIM}]",
+        spinner="dots2", spinner_style=_AMBER_HI,
+    ):
+        from ..router import ChatRequest
+        system = f"Du bist ein spezialisierter {label}-Agent. Deine Aufgabe: {task_type}."
+        try:
+            req = ChatRequest(prompt=task, system=system, task_type=task_type,
+                              sensitive=private, max_tokens=4096)
+            resp = router.route(req)
+            answer = resp.text.strip()
+            model_lbl = resp.model
+        except Exception as exc:
+            answer = f"Fehler: {exc}"
+            model_lbl = "?"
+
+    stats["msgs"] += 1
+    _print_bot(console, answer, label=f"{label} · {model_lbl}")
+    history.extend([f"User [{mode}]: {task}", f"Nexoryx: {answer[:300]}"])
+    mem.remember(f"{label}: {task} → {answer[:200]}", scope="long")
+
+
+def _cmd_agent_named(console: "Console", arg: str, mem, router, history, private: bool, cfg, home: str, stats: dict) -> None:
+    parts = arg.split(maxsplit=1)
+    if len(parts) < 2:
+        from ..agents import AGENTS
+        names = ", ".join(AGENTS.keys())
+        console.print(f"  [dim]Nutzung: /agent <name> <aufgabe>[/dim]\n  [dim]Agenten: {names}[/dim]")
+        return
+    name, task = parts[0], parts[1]
+    _cmd_agent_mode(console, name, task, mem, router, history, private, cfg, home, stats)
+
+
+def _handle_personality(console: "Console", sub: str, parts_cmd: list[str],
+                        current: dict, profile, fc_model) -> dict:
+    from ..memory.personalities import get_default, list_personalities, get as get_personality
+
+    if not sub or sub == "list":
+        _cmd_personality_list(console, current)
+        return current
+
+    elif sub == "switch" and len(parts_cmd) > 2:
+        target = parts_cmd[2].strip()
+        p = get_personality(target)
+        if p:
+            _banner(console, profile, fc_model, p)
+            console.print(f"  [{_AMBER}]◆  Persönlichkeit: {p['display_name']}[/{_AMBER}]")
+            return p
+        console.print(f"  [yellow]Unbekannt:[/yellow] '{target}'  —  /personality list")
+        return current
+
+    elif sub == "default" and len(parts_cmd) > 2:
+        from ..memory.personalities import set_default as _set_def
+        name = parts_cmd[2].strip()
+        if _set_def(name):
+            console.print(f"  [bold {_GREEN}]✓[/bold {_GREEN}]  Standard gesetzt: {name}")
+        else:
+            console.print(f"  [bold {_RED}]✗[/bold {_RED}]  Nicht gefunden: {name}")
+        return current
+
+    elif sub == "create":
+        return _cmd_personality_create(console)
+
+    elif sub == "delete" and len(parts_cmd) > 2:
+        from ..memory.personalities import delete as _del
+        name = parts_cmd[2].strip()
+        if _del(name):
+            console.print(f"  [bold {_GREEN}]✓[/bold {_GREEN}]  Gelöscht: {name}")
+        else:
+            console.print(f"  [bold {_RED}]✗[/bold {_RED}]  Nicht löschbar: {name}")
+        return current
+
+    else:
+        p = get_personality(sub)
+        if p:
+            _banner(console, profile, fc_model, p)
+            console.print(f"  [{_AMBER}]◆  Persönlichkeit: {p['display_name']}[/{_AMBER}]")
+            return p
+        console.print(
+            f"  [dim]Nutzung:[/dim]\n"
+            f"    [bold]/personality list[/bold]         — alle anzeigen\n"
+            f"    [bold]/personality <name>[/bold]        — wechseln\n"
+            f"    [bold]/personality create[/bold]        — neue erstellen\n"
+            f"    [bold]/personality default <name>[/bold] — Standard setzen\n"
+            f"    [bold]/personality delete <name>[/bold]  — löschen"
+        )
+        return current
+
+
 # ── Visuelle Bausteine ────────────────────────────────────────────────────────
+
+_STEP_ICONS = {
+    "terminal":   "⚡",
+    "fs_read":    "◎",
+    "fs_write":   "✎",
+    "web_search": "◌",
+    "http_fetch": "⬇",
+    "glob":       "⊛",
+    "grep":       "⊕",
+    "git":        "⎇",
+}
+
 
 def _banner(console: "Console", profile, fc_model: str | None = None,
             personality: dict | None = None) -> None:
-    """Banner mit Maskottchen links, Titeltext rechts."""
     console.print()
     console.rule(style=_AMBER_DIM)
 
-    # Maskottchen als Rich-Text
     mascot_t = Text()
     for bright, line in _MASCOT:
         style = f"bold {_AMBER_HI}" if bright else _AMBER_DIM
         mascot_t.append(line + "\n", style=style)
 
-    # Titelblock rechts
     pname = personality.get("display_name", "Nex") if personality else "Nex"
     tone  = personality.get("tone", "") if personality else ""
 
     info = Text()
     info.append("\n")
-    # Großer Titel — leicht letter-spaced
     info.append("N E X O R Y X\n", style=f"bold {_AMBER_HI}")
     info.append("─" * 16 + "\n", style=_AMBER_DIM)
     info.append(f"◆  {pname}", style=f"bold {_AMBER}")
@@ -413,9 +700,13 @@ def _banner(console: "Console", profile, fc_model: str | None = None,
     if fc_model:
         info.append(f"  ·  {fc_model}", style=_AMBER_DIM)
     info.append("\n\n")
-    info.append("   /help", style=f"{_AMBER_DIM}")
-    info.append("  /personality", style=f"{_AMBER_DIM}")
-    info.append("  /exit\n", style=f"{_AMBER_DIM}")
+
+    # Befehlsübersicht — zwei Spalten
+    cmds_left  = ["/help", "/code", "/plan", "/research", "/train"]
+    cmds_right = ["/settings", "/memory", "/tools", "/stats", "/exit"]
+    for l, r in zip(cmds_left, cmds_right):
+        info.append(f"   {l:<14}", style=_AMBER_DIM)
+        info.append(f"{r}\n", style=_AMBER_DIM)
 
     grid = Table.grid(padding=(0, 2))
     grid.add_column(justify="left", vertical="middle")
@@ -431,24 +722,21 @@ def _ts() -> str:
     from datetime import datetime
     return datetime.now().strftime("%H:%M")
 
+def _ts_full() -> str:
+    from datetime import datetime
+    return datetime.now().strftime("%d.%m.%Y %H:%M")
+
 
 def _print_user(console: "Console", text: str) -> None:
-    """Nutzereingabe — Chat-Bubble rechts, passt sich der Textlänge an."""
     ts = _ts()
     lines = text.split("\n")
     max_len = max(len(l) for l in lines) if lines else len(text)
     bubble_w = min(max_len + 10, int(console.width * 0.72), console.width - 4)
 
     body = Text(text, overflow="fold", style="bold white")
-    p = Panel(
-        body,
-        border_style=_SLATE,
-        box=box.ROUNDED,
-        padding=(0, 2),
-        width=bubble_w,
-    )
+    p = Panel(body, border_style=_SLATE, box=box.ROUNDED, padding=(0, 2), width=bubble_w)
     footer = Text()
-    footer.append(f"Du  ", style=f"bold {_SLATE_DIM}")
+    footer.append("Du  ", style=f"bold {_SLATE_DIM}")
     footer.append(ts, style=f"dim {_SLATE_DIM}")
 
     console.print()
@@ -499,14 +787,10 @@ def _cmd_personality_list(console: "Console", current: dict) -> None:
             rows.append("  (Standard)", style="dim")
         rows.append("\n")
 
-    console.print(Panel(
-        rows,
+    console.print(Panel(rows,
         title=f"[bold {_AMBER}]◆  Persönlichkeiten[/bold {_AMBER}]",
         title_align="left",
-        border_style=_AMBER_DIM,
-        box=box.HEAVY_HEAD,
-        padding=(0, 2),
-    ))
+        border_style=_AMBER_DIM, box=box.HEAVY_HEAD, padding=(0, 2)))
     console.print(
         f"  [dim]Wechseln:[/dim] [bold]/personality <name>[/bold]  "
         f"[dim]·  Erstellen:[/dim] [bold]/personality create[/bold]"
@@ -518,52 +802,31 @@ def _cmd_personality_create(console: "Console") -> dict:
     console.print()
     console.print(f"  [{_AMBER}]● Neue Persönlichkeit erstellen[/{_AMBER}]")
     console.print(f"  [dim]Leere Eingabe = Standardwert übernehmen[/dim]\n")
-
     try:
         name = console.input(f"  [dim]Interner Name (z. B. 'freund'):[/dim] ").strip().lower()
         if not name:
             console.print("  [red]Abgebrochen.[/red]")
             return get_default()
-
-        display = console.input(f"  [dim]Anzeige-Name (z. B. 'Freund'):[/dim] ").strip()
-        if not display:
-            display = name.capitalize()
-
-        tone = console.input(f"  [dim]Ton/Charakter (z. B. 'humorvoll, locker'):[/dim] ").strip()
-        if not tone:
-            tone = "freundlich"
-
-        language = console.input(f"  [dim]Sprache (Enter = Deutsch):[/dim] ").strip()
-        if not language:
-            language = "Deutsch"
-
-        console.print(f"  [dim]System-Prompt (beschreibe wie {display} sich verhält):[/dim]")
-        prompt_lines: list[str] = []
+        display = console.input(f"  [dim]Anzeige-Name (z. B. 'Freund'):[/dim] ").strip() or name.capitalize()
+        tone = console.input(f"  [dim]Ton/Charakter (z. B. 'humorvoll, locker'):[/dim] ").strip() or "freundlich"
+        language = console.input(f"  [dim]Sprache (Enter = Deutsch):[/dim] ").strip() or "Deutsch"
+        console.print(f"  [dim]System-Prompt — beschreibe wie {display} sich verhält:[/dim]")
         console.print(f"  [dim](leere Zeile zum Beenden)[/dim]")
+        prompt_lines: list[str] = []
         while True:
             line = console.input("  ").strip()
             if not line:
                 break
             prompt_lines.append(line)
-
-        if not prompt_lines:
-            system_prompt = (
-                f"Du bist {display}, ein {tone} KI-Assistent. "
-                f"Antworte immer auf {language}."
-            )
-        else:
-            system_prompt = " ".join(prompt_lines)
-
-        is_default_ans = console.input(
+        system_prompt = " ".join(prompt_lines) if prompt_lines else (
+            f"Du bist {display}, ein {tone} KI-Assistent. Antworte immer auf {language}.")
+        is_def = console.input(
             f"  [dim]Als Standard setzen? [[/dim][bold]j[/bold][dim]/n]:[/dim] "
-        ).strip().lower()
-        is_default = is_default_ans in ("j", "ja", "y", "yes", "")
-
-        p = create(name, display, tone, language, system_prompt, is_default)
-        console.print(f"\n  [green]✓[/green] Persönlichkeit '{display}' erstellt.")
+        ).strip().lower() in ("j", "ja", "y", "yes", "")
+        p = create(name, display, tone, language, system_prompt, is_def)
+        console.print(f"\n  [bold {_GREEN}]✓[/bold {_GREEN}]  Persönlichkeit '{display}' erstellt.")
         console.print(f"  [dim]Aktivieren: /personality {name}[/dim]")
         return p
-
     except (EOFError, KeyboardInterrupt):
         console.print("\n  [dim]Abgebrochen.[/dim]")
         return get_default()
@@ -571,20 +834,24 @@ def _cmd_personality_create(console: "Console") -> dict:
 
 # ── On-Exit-Hook ─────────────────────────────────────────────────────────────
 
-def _on_exit(console: "Console", history: list[str]) -> None:
-    """Läuft nach dem Schließen der TUI: Persona lernen + Training + Upload."""
+def _on_exit(console: "Console", history: list[str], stats: dict) -> None:
     if not history:
         return
-    # Persona aus gesamter Sitzung extrahieren
     try:
         from ..memory.persona import learn_from_history
         learn_from_history(history)
     except Exception:
         pass
-    # Training + Upload still im Hintergrund
     try:
         from ..training.on_exit import run_background
         run_background(console=None)
+    except Exception:
+        pass
+    # Auto-Training: wenn genug neue Daten vorhanden im Hintergrund starten
+    try:
+        from ..training.scheduler import _check_and_train
+        import threading
+        threading.Thread(target=_check_and_train, daemon=True, name="nexoryx-exit-train").start()
     except Exception:
         pass
 
@@ -592,9 +859,7 @@ def _on_exit(console: "Console", history: list[str]) -> None:
 # ── Update-Helfer ─────────────────────────────────────────────────────────────
 
 def _do_update(console: "Console") -> None:
-    import os
-    import subprocess
-    import time
+    import os, subprocess, time
     from pathlib import Path
     repo = Path(__file__).resolve().parents[3]
     with console.status(
@@ -606,9 +871,8 @@ def _do_update(console: "Console") -> None:
     if pull.returncode != 0:
         console.print(Panel(
             Text(pull.stderr.strip() or "Unbekannter Fehler", style="red"),
-            title=f"[red]✗ git pull fehlgeschlagen[/red]",
-            border_style="red", box=box.ROUNDED, padding=(0, 2),
-        ))
+            title=f"[bold {_RED}]✗ git pull fehlgeschlagen[/bold {_RED}]",
+            border_style="red", box=box.ROUNDED, padding=(0, 2)))
         return
     msg = pull.stdout.strip()
     if "Already up to date" in msg or "Bereits aktuell" in msg:
@@ -622,11 +886,10 @@ def _do_update(console: "Console") -> None:
         pip = subprocess.run([sys.executable, "-m", "pip", "install", "-e", ".", "-q"],
                              cwd=repo, capture_output=True, text=True)
     if pip.returncode != 0:
-        console.print(f"  [red]pip fehlgeschlagen:[/red]\n{pip.stderr.strip()}")
+        console.print(f"  [bold {_RED}]pip fehlgeschlagen:[/bold {_RED}]\n{pip.stderr.strip()}")
         return
     console.print(f"  [bold {_GREEN}]✓[/bold {_GREEN}]  Update installiert — starte neu …\n")
     time.sleep(0.8)
-    # Prozess in-place neustarten (kein manueller Restart nötig)
     os.execv(sys.executable, [sys.executable] + sys.argv)
 
 
@@ -636,18 +899,16 @@ _SETTINGS_KEYS = [
     ("anthropic",  "ANTHROPIC_API_KEY",   "Anthropic Claude"),
     ("openai",     "OPENAI_API_KEY",       "OpenAI GPT-4o"),
     ("gemini",     "GEMINI_API_KEY",       "Google Gemini"),
-    ("telegram",   "TELEGRAM_BOT_TOKEN",  "Telegram Bot-Token"),
+    ("telegram",   "TELEGRAM_BOT_TOKEN",   "Telegram Bot-Token"),
     ("github",     "GITHUB_PAT",           "GitHub PAT (Training-Upload)"),
 ]
 
 
 def _cmd_settings(console: "Console") -> None:
-    """Interaktive Einstellungen — API-Keys verwalten."""
     from ..platform import config as cfg_mod
     import getpass
 
     while True:
-        # Status-Tabelle
         rows = Text()
         for i, (slug, env, label) in enumerate(_SETTINGS_KEYS, 1):
             val = cfg_mod.get_key(env) or ""
@@ -656,24 +917,20 @@ def _cmd_settings(console: "Console") -> None:
                 status = Text()
                 status.append(f"  [{i}]  ", style=f"bold {_AMBER}")
                 status.append(f"{label:<28}", style="white")
-                status.append(masked, style=f"{_GREEN}")
+                status.append(masked, style=f"bold {_GREEN}")
             else:
                 status = Text()
                 status.append(f"  [{i}]  ", style="dim")
                 status.append(f"{label:<28}", style="dim")
-                status.append("nicht gesetzt", style="dim red")
+                status.append("nicht gesetzt", style=f"dim {_RED}")
             rows.append_text(status)
             rows.append("\n")
 
-        console.print(Panel(
-            rows,
+        console.print(Panel(rows,
             title=f"[bold {_AMBER}]◆  Einstellungen[/bold {_AMBER}]",
             title_align="left",
-            subtitle=f"[dim {_AMBER_DIM}]Nummer = Key setzen  ·  d = löschen  ·  Enter = fertig[/dim {_AMBER_DIM}]",
-            border_style=_AMBER_DIM,
-            box=box.HEAVY_HEAD,
-            padding=(0, 1),
-        ))
+            subtitle=f"[dim {_AMBER_DIM}]Nummer = Key setzen  ·  d<Nr> = löschen  ·  Enter = fertig[/dim {_AMBER_DIM}]",
+            border_style=_AMBER_DIM, box=box.HEAVY_HEAD, padding=(0, 1)))
 
         try:
             choice = console.input(f"  [{_AMBER}]▸[/{_AMBER}]  ").strip().lower()
@@ -683,7 +940,6 @@ def _cmd_settings(console: "Console") -> None:
         if not choice or choice in ("q", "exit", "fertig"):
             break
 
-        # Löschen: "d1" oder "d anthropic"
         if choice.startswith("d"):
             target = choice[1:].strip()
             for i, (slug, env, label) in enumerate(_SETTINGS_KEYS, 1):
@@ -692,7 +948,6 @@ def _cmd_settings(console: "Console") -> None:
                     console.print(f"  [dim]✗  {label} gelöscht.[/dim]")
             continue
 
-        # Nummer eingegeben
         try:
             idx = int(choice) - 1
             slug, env, label = _SETTINGS_KEYS[idx]
@@ -738,8 +993,7 @@ def _run_plain(router, mem, cfg, profile) -> int:
         ctx = ToolContext(role=cfg.role, project_root=home,
                           actor="tui", auto_approve=False, sandbox=False)
         try:
-            answer, steps = run_fc(user, ctx, confirm_cb=lambda t, a: True,
-                                   model=fc_model)
+            answer, steps = run_fc(user, ctx, confirm_cb=lambda t, a: True, model=fc_model)
             print(f"\n  Nexoryx: {answer.rstrip()}\n")
         except Exception as exc:
             print(f"  Fehler: {exc}")
