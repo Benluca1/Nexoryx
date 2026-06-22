@@ -10,6 +10,7 @@ Dateien unter ~/.nexoryx/memory/:
   corrections.md — was hat der User korrigiert / was soll anders laufen
   interests.md   — welche Themen/Technologien interessieren den User
   preferences.md — implizite Stil- & Formatierungs-Vorlieben
+  soul.md        — Werte, Träume, Motivation, Lebensphilosophie des Users
 """
 from __future__ import annotations
 
@@ -30,6 +31,7 @@ _FILE_HEADERS = {
     "corrections.md": "# Korrekturen\n",
     "interests.md":   "# Interessen & Themen\n",
     "preferences.md": "# Stil-Vorlieben\n",
+    "soul.md":        "# Seele — Werte · Träume · Philosophie\n",
 }
 
 # (Datei, Regex-Muster) — matched → Fakt eintragen
