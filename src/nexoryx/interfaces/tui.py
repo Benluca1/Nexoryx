@@ -908,6 +908,209 @@ def _cmd_profile(console: "Console", arg: str, is_admin: bool) -> None:
         )
 
 
+
+# ── Neue Slash-Befehl Implementierungen ───────────────────────────────────────
+
+def _cmd_panic(console: "Console") -> None:
+    import subprocess, signal, os
+    from pathlib import Path
+    console.print()
+    pid_file = Path.home() / ".nexoryx" / "nexoryxd.pid"
+    killed = []
+    if pid_file.exists():
+        try:
+            pid = int(pid_file.read_text().strip())
+            os.kill(pid, signal.SIGTERM)
+            pid_file.unlink(missing_ok=True)
+            killed.append(f"nexoryxd (PID {pid})")
+        except Exception:
+            pass
+    autotrain_pid = Path.home() / ".nexoryx" / "autotrain.pid"
+    if autotrain_pid.exists():
+        try:
+            pid = int(autotrain_pid.read_text().strip())
+            os.kill(pid, signal.SIGTERM)
+            autotrain_pid.unlink(missing_ok=True)
+            killed.append(f"autotrain (PID {pid})")
+        except Exception:
+            pass
+    if killed:
+        console.print(Panel(
+            Text("Gestoppt: " + ", ".join(killed), style=f"bold {_RED}"),
+            title=f"[bold {_RED}]◆ PANIC[/bold {_RED}]",
+            border_style=_RED, box=box.HEAVY, padding=(0, 2)))
+    else:
+        console.print(f"  [dim]Keine laufenden Nexoryx-Prozesse gefunden.[/dim]")
+
+
+def _cmd_run(console: "Console", task: str, mem, cfg, home: str, stats: dict) -> None:
+    from ..router import ChatRequest, ProviderError
+    from ..memory import MemoryStore
+    from ..tools import ToolContext
+    from ..orchestrator.fc_runner import run_fc, available_model
+    console.print()
+    fc_model = available_model()
+    ctx = ToolContext(role=cfg.role, project_root=home, actor="tui", auto_approve=False)
+    with console.status(
+        f"[bold {_AMBER}]◆[/bold {_AMBER}]  [{_AMBER_DIM}]Plane: {task[:60]} …[/{_AMBER_DIM}]",
+        spinner="dots2", spinner_style=_AMBER_HI,
+    ):
+        try:
+            answer, steps = run_fc(task, ctx, model=fc_model)
+        except Exception as exc:
+            console.print(f"  [bold {_RED}]Fehler:[/bold {_RED}]  [dim]{exc}[/dim]")
+            return
+    n = len(steps)
+    step_txt = f" · {n} Schritt{'e' if n != 1 else ''}" if n else ""
+    _print_bot(console, answer, label=f"run{step_txt}")
+    stats["msgs"] += 1
+    stats["steps"] += n
+    mem.remember(f"Run: {task} → {answer[:200]}", scope="long")
+
+
+def _cmd_config(console: "Console", arg: str, is_admin: bool) -> None:
+    from ..platform import config as cfg_mod
+    cfg = cfg_mod.load()
+    console.print()
+    parts = arg.split(maxsplit=2)
+    action = parts[0].lower() if parts else ""
+
+    if action == "set":
+        if not is_admin:
+            console.print(f"  [bold {_RED}]Nur für Admins.[/bold {_RED}]")
+            return
+        if len(parts) < 3:
+            console.print("  [dim]Nutzung: /config set <key> <wert>[/dim]")
+            return
+        key, val = parts[1], parts[2]
+        if hasattr(cfg, key):
+            setattr(cfg, key, val)
+            cfg_mod.save(cfg)
+            console.print(f"  [bold {_GREEN}]✓[/bold {_GREEN}]  {key} = {val}")
+        else:
+            console.print(f"  [bold {_RED}]Unbekannter Key:[/bold {_RED}]  {key}")
+        return
+
+    # get / list
+    tbl = Table(box=box.SIMPLE, show_header=False, padding=(0, 1))
+    tbl.add_column(style=_AMBER_DIM, width=22)
+    tbl.add_column(style="white")
+    safe_keys = ["role", "persona", "house_base", "house_trained",
+                 "house_version", "install_source", "language"]
+    for k in safe_keys:
+        if action and k != action:
+            continue
+        v = getattr(cfg, k, "—")
+        tbl.add_row(k, str(v) if v is not None else "—")
+    console.print(Panel(tbl,
+        title=f"[{_AMBER}]◆ Konfiguration[/{_AMBER}]",
+        border_style=_AMBER_DIM, box=box.ROUNDED, padding=(0, 1)))
+
+
+def _cmd_project(console: "Console", arg: str, mem, home: str) -> None:
+    import os
+    from pathlib import Path
+    console.print()
+    sub = arg.lower() if arg else "info"
+
+    if sub == "list":
+        # Projekte: Verzeichnisse mit .git oder pyproject.toml
+        base = Path(home)
+        projects = []
+        for p in base.iterdir():
+            if p.is_dir() and ((p / ".git").exists() or (p / "pyproject.toml").exists()):
+                projects.append(p.name)
+        if projects:
+            tbl = Table(box=box.SIMPLE, show_header=False, padding=(0, 1))
+            tbl.add_column(style=f"bold {_AMBER}")
+            for name in sorted(projects):
+                tbl.add_row(name)
+            console.print(Panel(tbl,
+                title=f"[{_AMBER}]◆ Projekte[/{_AMBER}]",
+                border_style=_AMBER_DIM, box=box.ROUNDED, padding=(0, 1)))
+        else:
+            console.print("  [dim]Keine Projekte gefunden.[/dim]")
+    else:
+        # info: aktuelle Projekt-Erinnerungen
+        entries = mem.recall("projekt", limit=8)
+        if not entries:
+            entries = mem.recent(5)
+        tbl = Table(box=box.SIMPLE, show_header=False, padding=(0, 1))
+        tbl.add_column(style=_AMBER_DIM, width=10)
+        tbl.add_column(style="white")
+        for m in entries:
+            tbl.add_row(m.scope, m.text[:120])
+        console.print(Panel(tbl,
+            title=f"[{_AMBER}]◆ Projekt-Kontext[/{_AMBER}]",
+            border_style=_AMBER_DIM, box=box.ROUNDED, padding=(0, 1)))
+
+
+def _cmd_keys(console: "Console", is_admin: bool) -> None:
+    from ..platform import config as cfg_mod
+    console.print()
+    key_names = [
+        ("ANTHROPIC_API_KEY", "Anthropic"),
+        ("OPENAI_API_KEY", "OpenAI"),
+        ("GEMINI_API_KEY", "Google Gemini"),
+        ("TELEGRAM_BOT_TOKEN", "Telegram Bot"),
+        ("GITHUB_PAT", "GitHub PAT"),
+    ]
+    tbl = Table(box=box.SIMPLE, show_header=False, padding=(0, 1))
+    tbl.add_column(style=_AMBER_DIM, width=18)
+    tbl.add_column(style="white")
+    for env_key, label in key_names:
+        val = cfg_mod.get_key(env_key)
+        if val:
+            masked = val[:4] + "••••" + val[-2:] if len(val) > 6 else "••••"
+            status = f"[bold {_GREEN}]✓[/bold {_GREEN}]  {masked}"
+        else:
+            status = f"[dim {_RED}]✗  nicht gesetzt[/dim {_RED}]"
+        tbl.add_row(label, status)
+    console.print(Panel(tbl,
+        title=f"[{_AMBER}]◆ API-Keys Status[/{_AMBER}]",
+        border_style=_AMBER_DIM, box=box.ROUNDED, padding=(0, 1)))
+    if not is_admin:
+        console.print(f"  [dim]Keys setzen: /settings  (oder nexoryx admin)[/dim]")
+
+
+def _cmd_telegram_status(console: "Console") -> None:
+    import threading
+    from ..platform import config as cfg_mod
+    console.print()
+    token = cfg_mod.get_key("TELEGRAM_BOT_TOKEN")
+    if not token:
+        console.print(Panel(
+            Text("Kein Token gesetzt.\nSetzen mit: /settings -> Telegram-Token", style="dim"),
+            title=f"[{_AMBER}]◆ Telegram Bot[/{_AMBER}]",
+            border_style=_AMBER_DIM, box=box.ROUNDED, padding=(0, 2)))
+        return
+
+    # Prüfe ob Watchdog-Thread läuft
+    tg_threads = [t for t in threading.enumerate()
+                  if "telegram" in t.name.lower() or "nexoryx-tg" in t.name.lower()]
+    running = bool(tg_threads)
+    masked = token[:8] + "••••"
+    lauf_str = "[bold green]läuft[/bold green]" if running else "[dim]gestoppt[/dim]"
+    status_text = (
+        f"Token:   {masked}\n"
+        f"Status:  {lauf_str}\n"
+        f"Threads: {len(tg_threads)}"
+    )
+    console.print(Panel(
+        status_text,
+        title=f"[{_AMBER}]◆ Telegram Bot[/{_AMBER}]",
+        border_style=(_GREEN if running else _AMBER_DIM),
+        box=box.ROUNDED, padding=(0, 2)))
+    if not running:
+        try:
+            from ..interfaces.telegram.bot import start_background
+            t = start_background()
+            if t:
+                console.print(f"  [bold {_GREEN}]✓[/bold {_GREEN}]  Bot neu gestartet.")
+        except Exception as exc:
+            console.print(f"  [dim {_RED}]Fehler beim Starten: {exc}[/dim {_RED}]")
+
+
 def _cmd_tools(console: "Console") -> None:
     from ..tools.registry import _REGISTRY
     tbl = Table(box=box.SIMPLE, show_header=True, padding=(0, 1))
