@@ -195,6 +195,124 @@ def cmd_train(args: argparse.Namespace) -> int:
 
 
 
+def cmd_train_background(_args: argparse.Namespace) -> int:
+    """Hintergrund-Trainings-Loop: trainieren → pushen → warten → wiederholen.
+
+    Wird von der TUI via subprocess.Popen(start_new_session=True) gestartet.
+    Läuft nach dem TUI-Exit weiter. Beendet sich nie selbst — kill via PID.
+    Log: ~/.nexoryx/autotrain.log   PID: ~/.nexoryx/autotrain.pid
+    """
+    import os
+    import time
+    from pathlib import Path
+    from .training.train import train, MIN_EXAMPLES
+    from .training.dataset import stats
+    from .training.scheduler import _notify_telegram, _save_last_count, _load_last_count
+
+    CHECK_INTERVAL = 3600   # jede Stunde prüfen ob neue Daten da sind
+    MIN_NEW        = 10     # mindestens 10 neue Beispiele für eine neue Runde
+
+    log_path = Path.home() / ".nexoryx" / "autotrain.log"
+    pid_path = Path.home() / ".nexoryx" / "autotrain.pid"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    pid_path.write_text(str(os.getpid()), encoding="utf-8")
+
+    def _log(msg: str) -> None:
+        ts = time.strftime("%Y-%m-%d %H:%M:%S")
+        print(f"[{ts}] {msg}", flush=True)
+
+    def _push() -> None:
+        try:
+            from .training.on_exit import run as _on_exit_run
+            _on_exit_run(silent=True)
+            _log("GitHub-Push abgeschlossen.")
+        except Exception as exc:
+            _log(f"Push-Fehler (nicht kritisch): {exc}")
+
+    def _run_one_cycle(total: int) -> str:
+        """Führt eine Trainingsrunde durch. Gibt action-String zurück."""
+        result = train()
+        action = result.get("action", "?")
+        if action == "trained":
+            v = result.get("house_version", "?")
+            model = result.get("model_name", f"nexoryx-house-v{v}")
+            _log(f"Hausmodell {model} erstellt.")
+            _notify_telegram(
+                f"✅ *Nexoryx trainiert*\n"
+                f"Modell: `{model}`\n"
+                f"Beispiele: {total}\n"
+                f"Starte nex — das neue Modell wird automatisch verwendet."
+            )
+            _save_last_count(total)
+        elif action == "script_generated":
+            deps = ", ".join(result.get("deps_missing", []))
+            _log(f"Trainings-Skript erzeugt (Deps fehlen: {deps})")
+            _notify_telegram(
+                f"📝 *Training: Skript erzeugt*\n"
+                f"Fehlende Pakete: `{deps}`\n"
+                f"`{result.get('instructions', '')}`"
+            )
+            _save_last_count(total)
+        elif action == "skipped":
+            _log(f"Übersprungen: {result.get('reason', '?')}")
+        elif action == "failed":
+            err = result.get("error", "?")
+            _log(f"Training fehlgeschlagen: {err}")
+            _notify_telegram(f"❌ *Training fehlgeschlagen*\n{err}")
+        return action
+
+    # ── Erste Runde sofort ────────────────────────────────────────────────────
+    _log("Auto-Trainings-Loop gestartet.")
+    st = stats()
+    total = st["total"]
+    _notify_telegram(
+        f"🏋️ *Auto-Training gestartet*\n"
+        f"Datensatz: {total} Beispiele\n"
+        f"Log: {log_path}"
+    )
+    try:
+        action = _run_one_cycle(total)
+        if action in ("trained", "script_generated"):
+            _push()
+    except Exception as exc:
+        _log(f"Erste Runde fehlgeschlagen: {exc}")
+        _notify_telegram(f"❌ *Auto-Training Ausnahme:* {exc}")
+
+    # ── Kontinuierlicher Loop ─────────────────────────────────────────────────
+    _log(f"Warte-Loop: prüfe alle {CHECK_INTERVAL // 60} Min. auf neue Daten.")
+    try:
+        while True:
+            time.sleep(CHECK_INTERVAL)
+            st = stats()
+            total = st["total"]
+            last = _load_last_count()
+            new_since = total - last
+            _log(f"Check: {total} gesamt, {new_since} neu seit letztem Training.")
+            if new_since < MIN_NEW:
+                _log(f"Noch {MIN_NEW - new_since} neue Beispiele nötig — warte weiter.")
+                continue
+            _log(f"Genug neue Daten ({new_since}) — starte Trainingsrunde.")
+            _notify_telegram(
+                f"🔄 *Neue Trainingsrunde*\n"
+                f"{new_since} neue Beispiele seit letztem Durchlauf."
+            )
+            try:
+                action = _run_one_cycle(total)
+                if action in ("trained", "script_generated"):
+                    _push()
+            except Exception as exc:
+                _log(f"Trainingsrunde fehlgeschlagen: {exc}")
+                _notify_telegram(f"❌ *Trainingsrunde fehlgeschlagen:* {exc}")
+    except KeyboardInterrupt:
+        _log("Loop manuell beendet.")
+    finally:
+        try:
+            pid_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+    return 0
+
+
 def cmd_panic(_args: argparse.Namespace) -> int:
     print(_c("PANIC: Kill-Switch ausgelöst — alle Tasks/Agenten würden gestoppt.", _RED))
     print("  (Daemon existiert noch nicht; in Phase 3+ stoppt das laufende Agenten.)")
@@ -639,6 +757,8 @@ def build_parser() -> argparse.ArgumentParser:
     te = tsub.add_parser("export", help="Datensatz als ChatML exportieren")
     te.add_argument("path")
     te.add_argument("--teacher-only", action="store_true", help="nur Cloud-Beispiele")
+    bg = tsub.add_parser("background", help="Hintergrund-Worker (von TUI gestartet)")
+    bg.set_defaults(func=cmd_train_background)
     train.set_defaults(func=cmd_train)
 
     sub.add_parser("panic", help="Kill-Switch: alle Tasks/Agenten stoppen").set_defaults(func=cmd_panic)

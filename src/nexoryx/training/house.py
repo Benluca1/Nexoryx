@@ -1,8 +1,7 @@
-"""Hardware-basierte Auswahl des Start-/House-Modells.
+"""Haus-Modell-Konfiguration.
 
-Wie beim Modell-Gating (§3): pro Profil ein bestehendes Modell als Basis —
-klein auf schwacher, groß auf starker Hardware. Dieses Modell wird genutzt,
-solange das eigene noch nicht trainiert ist, und ist die Distillation-Basis.
+Basismodell ist immer qwen2.5:0.5b — läuft auf jeder Hardware (CPU-only, 4 GB RAM).
+Nach dem Training heißt das Modell nexoryx-house-vN und wird in Ollama registriert.
 """
 
 from __future__ import annotations
@@ -10,23 +9,14 @@ from __future__ import annotations
 from ..platform.detect import Hardware
 from ..platform.profile import Profile
 
-# Pro Profil: Ollama-Tag (lokal ziehbar) + HuggingFace-ID (für Fine-Tuning).
+HOUSE_BASE = "qwen2.5:0.5b"
+HOUSE_HF   = "Qwen/Qwen2.5-0.5B-Instruct"
+
+# Für größere Hardware: optionale bessere Basis beim Pull
 HOUSE_BASES = {
-    "ultra_lite": {
-        "ollama": "qwen2.5:0.5b",
-        "hf": "Qwen/Qwen2.5-0.5B-Instruct",
-        "note": "winzig, CPU-only",
-    },
-    "balanced": {
-        "ollama": "qwen2.5:3b",
-        "hf": "Qwen/Qwen2.5-3B-Instruct",
-        "note": "klein-mittel",
-    },
-    "pro": {
-        "ollama": "qwen2.5:14b",
-        "hf": "Qwen/Qwen2.5-14B-Instruct",
-        "note": "groß, GPU empfohlen",
-    },
+    "ultra_lite": {"ollama": "qwen2.5:0.5b",  "hf": "Qwen/Qwen2.5-0.5B-Instruct"},
+    "balanced":   {"ollama": "qwen2.5:3b",    "hf": "Qwen/Qwen2.5-3B-Instruct"},
+    "pro":        {"ollama": "qwen2.5:14b",   "hf": "Qwen/Qwen2.5-14B-Instruct"},
 }
 
 

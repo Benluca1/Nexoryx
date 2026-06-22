@@ -25,7 +25,9 @@ except ImportError:
 
 try:
     from prompt_toolkit import PromptSession
-    from prompt_toolkit.completion import WordCompleter
+    from prompt_toolkit.completion import (
+        Completer, Completion, WordCompleter, PathCompleter,
+    )
     from prompt_toolkit.history import InMemoryHistory
     from prompt_toolkit.styles import Style as PTStyle
     HAS_PT = True
@@ -159,6 +161,47 @@ Einfach schreiben — Nexoryx erledigt es direkt.
 """
 
 
+# ── Kombinierter Completer: Slash-Befehle + Pfade ─────────────────────────────
+
+if HAS_PT:
+    import re as _re_comp
+    import os as _os_comp
+
+    class _NexCompleter(Completer):
+        """Slash-Befehle am Zeilenanfang, Pfad-Vervollständigung überall sonst."""
+
+        _path_re = _re_comp.compile(
+            r"(?:^|(?<=\s))"          # Anfang oder nach Whitespace
+            r"((?:~|\.{1,2})?/\S*)"  # / oder ~/ oder ./ oder ../
+            r"$"
+        )
+        _path_completer = PathCompleter(expanduser=True)
+
+        def get_completions(self, document, complete_event):
+            text = document.text_before_cursor
+
+            # Slash-Befehl: erstes Zeichen ist / und noch kein Leerzeichen
+            if text.startswith("/") and " " not in text.strip():
+                for cmd in _SLASH:
+                    if cmd.startswith(text):
+                        yield Completion(cmd[len(text):], display=cmd)
+                return
+
+            # Pfad-Erkennung: letztes Token sieht wie ein Pfad aus
+            m = self._path_re.search(text)
+            if m:
+                # PathCompleter auf das erkannte Pfad-Präfix anwenden
+                path_prefix = m.group(1)
+                sub_doc = document.text_before_cursor[len(text) - len(path_prefix):]
+                from prompt_toolkit.document import Document as _Doc
+                sub = _Doc(sub_doc, cursor_position=len(sub_doc))
+                yield from self._path_completer.get_completions(sub, complete_event)
+
+    _COMPLETER = _NexCompleter()
+else:
+    _COMPLETER = None  # type: ignore[assignment]
+
+
 # ── Öffentlicher Einstieg ─────────────────────────────────────────────────────
 
 def run() -> int:
@@ -177,6 +220,14 @@ def run() -> int:
     cfg = cfg_mod.load()
 
     fc_model = available_model()
+
+    # Telegram-Bot automatisch im Hintergrund starten (wie nexoryxd)
+    try:
+        from ..interfaces.telegram.bot import start_background as _tg_start
+        _tg_start()
+    except Exception:
+        pass
+
     home = os.path.expanduser("~")
 
     from ..memory.personalities import get_default, list_personalities, get as get_personality
@@ -190,16 +241,61 @@ def run() -> int:
     private = [False]
     session_admin = [False]  # in-memory admin-Modus, nicht persistiert
 
+    # Nutzernamen einmalig bei Sitzungsstart ermitteln
+    from ..training.on_exit import get_username as _get_username
+    _session_username = _get_username()
+
     _banner(console, profile, fc_model, current_personality)
+
+    # Hinweis: läuft noch ein /autotrain-Prozess?
+    if _autotrain_running():
+        from pathlib import Path as _P
+        log_path = _P.home() / ".nexoryx" / "autotrain.log"
+        console.print(Panel(
+            Text(f"Training läuft im Hintergrund.\nLog: {log_path}", style=f"bold {_GREEN}"),
+            title=f"[bold {_GREEN}]▶ Auto-Train aktiv[/bold {_GREEN}]",
+            border_style=_GREEN, box=box.ROUNDED, padding=(0, 2)))
 
     history: list[str] = []
 
     if HAS_PT:
         _pt_session: PromptSession = PromptSession(
-            completer=WordCompleter(_SLASH, sentence=True),
+            completer=_COMPLETER,
+            complete_while_typing=False,  # nur bei Tab, nicht automatisch
             history=InMemoryHistory(),
             style=PTStyle.from_dict({"prompt": f"bold {_AMBER}"}),
         )
+
+    # ── 5-Minuten-Inaktivitäts-Autotrain ─────────────────────────────────────
+    import threading
+    import time as _time
+
+    _last_activity = [_time.monotonic()]
+    _INACTIVITY_SECS = 300   # 5 Minuten
+    _inactivity_trained = [False]  # pro Sitzung nur einmal auslösen
+    _inactivity_stop = threading.Event()
+
+    def _inactivity_watcher() -> None:
+        while not _inactivity_stop.is_set():
+            _inactivity_stop.wait(30)
+            if _inactivity_stop.is_set():
+                break
+            idle = _time.monotonic() - _last_activity[0]
+            if idle >= _INACTIVITY_SECS and not _inactivity_trained[0]:
+                _inactivity_trained[0] = True
+                try:
+                    from ..training.scheduler import _check_and_train
+                    threading.Thread(
+                        target=_check_and_train, daemon=True,
+                        name="nexoryx-inactivity-train",
+                    ).start()
+                except Exception:
+                    pass
+
+    _watcher_thread = threading.Thread(
+        target=_inactivity_watcher, daemon=True, name="nexoryx-inactivity-watcher"
+    )
+    _watcher_thread.start()
 
     def _get_input() -> str:
         lock = "🔒 " if private[0] else ""
@@ -216,11 +312,15 @@ def run() -> int:
         try:
             user = _get_input()
         except (EOFError, KeyboardInterrupt):
+            _inactivity_stop.set()
             console.print()
             console.rule("[dim]Auf Wiedersehen[/dim]", style=_AMBER_DIM)
-            _on_exit(console, history, _session_stats)
+            _on_exit(console, history, _session_stats, _session_username)
             console.print()
             return 0
+
+        _last_activity[0] = _time.monotonic()
+        _inactivity_trained[0] = False  # Aktivität → nächste Pause wieder messen
 
         if not user:
             continue
@@ -232,8 +332,9 @@ def run() -> int:
             arg = parts[1].strip() if len(parts) > 1 else ""
 
             if cmd in ("/exit", "/quit"):
+                _inactivity_stop.set()
                 console.rule("[dim]Auf Wiedersehen[/dim]", style=_AMBER_DIM)
-                _on_exit(console, history, _session_stats)
+                _on_exit(console, history, _session_stats, _session_username)
                 console.print()
                 return 0
 
@@ -542,14 +643,33 @@ def _cmd_train(console: "Console") -> None:
         console.print(f"  [bold {_RED}]✗[/bold {_RED}]  Fehler: {result.get('error')}")
 
 
-def _cmd_autotrain(console: "Console", is_admin: bool) -> None:
-    """Startet das Hausmodell-Training im Hintergrund und kehrt sofort zurück.
+def _autotrain_running() -> bool:
+    """Prüft ob ein /autotrain-Prozess gerade läuft (PID-Datei)."""
+    from pathlib import Path
+    pid_path = Path.home() / ".nexoryx" / "autotrain.pid"
+    if not pid_path.exists():
+        return False
+    try:
+        import os
+        pid = int(pid_path.read_text(encoding="utf-8").strip())
+        os.kill(pid, 0)  # sendet kein Signal, prüft nur Existenz
+        return True
+    except (OSError, ValueError):
+        try:
+            pid_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return False
 
-    Du kannst die TUI danach schließen oder weiter nutzen — das Training
-    läuft als Daemon-Thread und sendet bei Fertigstellung eine Telegram-
-    Benachrichtigung.
+
+def _cmd_autotrain(console: "Console", is_admin: bool) -> None:
+    """Startet das Hausmodell-Training als eigenständigen Prozess.
+
+    Der Prozess läuft weiter auch wenn die TUI geschlossen wird.
+    Fertigmeldung kommt per Telegram. Log: ~/.nexoryx/autotrain.log
     """
-    import threading
+    import subprocess
+    import sys
     from pathlib import Path
 
     if not is_admin:
@@ -558,15 +678,20 @@ def _cmd_autotrain(console: "Console", is_admin: bool) -> None:
             border_style=_RED, box=box.ROUNDED, padding=(0, 2)))
         return
 
-    from ..training.train import train_report
-    from ..training import dataset
+    # Bereits laufenden Prozess erkennen
+    if _autotrain_running():
+        log_path = Path.home() / ".nexoryx" / "autotrain.log"
+        console.print(Panel(
+            Text(f"Training läuft bereits.\nLog: {log_path}", style=f"bold {_YELLOW}"),
+            border_style=_YELLOW, box=box.ROUNDED, padding=(0, 2)))
+        return
 
+    from ..training.train import train_report
     report = train_report()
     total = report["dataset"]["total"]
     teacher = report["dataset"].get("teacher", 0)
     MIN = 50
 
-    # Status-Tabelle
     tbl = Table(box=box.SIMPLE, show_header=False, padding=(0, 2))
     tbl.add_column(style=_AMBER_DIM, width=22)
     tbl.add_column(style="white")
@@ -591,50 +716,35 @@ def _cmd_autotrain(console: "Console", is_admin: bool) -> None:
         )
         return
 
-    console.print(
-        f"  [bold {_GREEN}]▶[/bold {_GREEN}]  Starte Hintergrund-Training "
-        f"[dim]({total} Beispiele)[/dim]\n"
-        f"  [dim]Du kannst die TUI jetzt schließen oder weiter nutzen.[/dim]\n"
-        f"  [dim]Telegram-Benachrichtigung bei Fertigstellung.[/dim]"
-    )
+    log_path = Path.home() / ".nexoryx" / "autotrain.log"
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_fh = open(log_path, "w", encoding="utf-8")
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "nexoryx", "train", "background"],
+            start_new_session=True,   # vom Terminal-Prozess abkoppeln
+            stdout=log_fh,
+            stderr=subprocess.STDOUT,
+        )
+        pid = proc.pid
+    except Exception as exc:
+        console.print(Panel(
+            Text(f"Prozess-Start fehlgeschlagen: {exc}", style=f"bold {_RED}"),
+            border_style=_RED, box=box.ROUNDED, padding=(0, 2)))
+        return
 
-    def _bg_train():
-        from ..training.train import train
-        from ..training.scheduler import _notify_telegram, _save_last_count
-        try:
-            out_dir = Path.home() / ".nexoryx" / "auto_training"
-            _notify_telegram(
-                f"🏋️ *Auto-Training gestartet* (manuell via /autotrain)\n"
-                f"Datensatz: {total} Beispiele"
-            )
-            result = train(repo_root=out_dir)
-            action = result.get("action", "?")
-            if action == "trained":
-                v = result.get("house_version", "?")
-                _notify_telegram(f"✅ *Auto-Training abgeschlossen* — Version {v}")
-                _save_last_count(total)
-            elif action == "script_generated":
-                deps_str = ", ".join(result.get("deps_missing", []))
-                _notify_telegram(
-                    f"📝 *Training-Skript erzeugt*\n"
-                    f"Fehlende Pakete: {deps_str}\n"
-                    f"{result.get('instructions', '')}"
-                )
-                _save_last_count(total)
-            elif action == "failed":
-                _notify_telegram(f"❌ *Auto-Training fehlgeschlagen*\n{result.get('error', '?')}")
-            # Upload via on_exit
-            try:
-                from ..training.on_exit import run_background
-                run_background(console=None)
-            except Exception:
-                pass
-        except Exception as exc:
-            from ..training.scheduler import _notify_telegram as _n
-            _n(f"❌ *Auto-Train Ausnahme:* {exc}")
-
-    t = threading.Thread(target=_bg_train, daemon=True, name="nexoryx-autotrain")
-    t.start()
+    tbl2 = Table(box=box.SIMPLE, show_header=False, padding=(0, 2))
+    tbl2.add_column(style=_AMBER_DIM, width=22)
+    tbl2.add_column(style="white")
+    tbl2.add_row("PID", str(pid))
+    tbl2.add_row("Datensatz", f"{total} Beispiele")
+    tbl2.add_row("Log", str(log_path))
+    tbl2.add_row("", "")
+    tbl2.add_row("Du kannst die TUI", "jetzt schließen")
+    tbl2.add_row("Fertigmeldung via", "Telegram")
+    console.print(Panel(tbl2,
+        title=f"[bold {_GREEN}]▶  Training gestartet[/bold {_GREEN}]",
+        border_style=_GREEN, box=box.HEAVY_HEAD, padding=(0, 1)))
 
 
 def _cmd_profile(console: "Console", arg: str, is_admin: bool) -> None:
@@ -1113,20 +1223,20 @@ def _cmd_personality_create(console: "Console") -> dict:
 
 # ── On-Exit-Hook ─────────────────────────────────────────────────────────────
 
-def _on_exit(console: "Console", history: list[str], stats: dict) -> None:
-    if not history:
-        return
+def _on_exit(console: "Console", history: list[str], stats: dict,
+             username: str | None = None) -> None:
     try:
         from ..memory.persona import learn_from_history
         learn_from_history(history)
     except Exception:
         pass
     try:
-        from ..training.on_exit import run_background
-        run_background(console=None)
+        from ..training.on_exit import run_background, get_username
+        uname = username or get_username()
+        run_background(console=None, history=history, username=uname)
     except Exception:
         pass
-    # Auto-Training: wenn genug neue Daten vorhanden im Hintergrund starten
+    # Auto-Training: nach jedem Exit prüfen ob genug neue Daten vorhanden
     try:
         from ..training.scheduler import _check_and_train
         import threading

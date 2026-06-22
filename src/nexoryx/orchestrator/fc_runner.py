@@ -83,8 +83,10 @@ _TOOL_DEFS = [
 def available_model() -> str | None:
     """Gibt das beste verfügbare Function-Calling-Modell zurück oder None.
 
-    Gibt den exakten installierten Modell-Namen zurück (z. B. 'qwen2.5:0.5b'),
-    bevorzugt Modelle aus _FC_MODELS nach Qualität.
+    Reihenfolge:
+    1. Trainiertes Hausmodell (nexoryx-house-vN) wenn house_trained=True
+    2. Präferenz-Liste (_FC_MODELS) — exakter oder Prefix-Match
+    3. Beliebiges installiertes Modell als letzter Ausweg
     """
     try:
         import ollama as _ol
@@ -100,18 +102,25 @@ def available_model() -> str | None:
     if not installed:
         return None
 
-    # Prüfe Präferenz-Liste zuerst (exakter Match oder Tag-Prefix-Match)
+    # 1. Trainiertes Hausmodell bevorzugen
+    try:
+        from ..platform.config import load as _load_cfg
+        cfg = _load_cfg()
+        if cfg.house_trained and cfg.house_base and cfg.house_base in installed:
+            return cfg.house_base
+    except Exception:
+        pass
+
+    # 2. Präferenz-Liste (exakter Match oder Tag-Prefix-Match)
     for preferred in _FC_MODELS:
-        # Exakter Match
         if preferred in installed:
             return preferred
-        # Prefix-Match: 'qwen2.5' matcht 'qwen2.5:0.5b'
         prefix = preferred.split(":")[0]
         for name in installed:
             if name.split(":")[0] == prefix:
-                return name  # echten installierten Namen zurückgeben
+                return name
 
-    # Irgendein verfügbares Modell als letzter Ausweg
+    # 3. Irgendein verfügbares Modell
     return installed[0]
 
 
