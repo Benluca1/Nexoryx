@@ -63,9 +63,11 @@ _MASCOT = [
 
 _SLASH = [
     "/help", "/clear", "/doctor", "/models", "/usage",
-    "/memory", "/private", "/update", "/personality", "/settings",
-    "/train", "/autotrain", "/tools", "/agent", "/code", "/plan", "/research",
-    "/exec", "/stats", "/search", "/about", "/admin", "/profile", "/exit", "/quit",
+    "/memory", "/forget", "/remember", "/private", "/update", "/personality", "/settings",
+    "/train", "/autotrain", "/tools", "/agent", "/code", "/plan", "/research", "/debug",
+    "/exec", "/run", "/stats", "/search", "/about", "/admin", "/profile",
+    "/version", "/panic", "/config", "/project", "/keys", "/telegram",
+    "/exit", "/quit",
 ]
 
 # ── Admin-Passwort (SHA-256 Hash) ─────────────────────────────────────────────
@@ -447,6 +449,45 @@ def run() -> int:
 
             elif cmd == "/profile":
                 _cmd_profile(console, arg, session_admin[0])
+
+            elif cmd == "/version":
+                from .. import __version__
+                console.print(f"  [bold {_AMBER}]nexoryx[/bold {_AMBER}]  [dim]{__version__}[/dim]")
+
+            elif cmd == "/panic":
+                _cmd_panic(console)
+
+            elif cmd == "/run":
+                if not arg:
+                    console.print("  [dim]Nutzung: /run <aufgabe>[/dim]")
+                else:
+                    _cmd_run(console, arg, mem, cfg, home, _session_stats)
+
+            elif cmd == "/config":
+                _cmd_config(console, arg, session_admin[0])
+
+            elif cmd == "/project":
+                _cmd_project(console, arg, mem, home)
+
+            elif cmd == "/keys":
+                _cmd_keys(console, session_admin[0])
+
+            elif cmd == "/forget":
+                if not arg:
+                    console.print("  [dim]Nutzung: /forget <query>[/dim]")
+                else:
+                    n = mem.forget(arg)
+                    console.print(f"  [dim]🗑  {n} Einträge gelöscht.[/dim]")
+
+            elif cmd == "/remember":
+                if not arg:
+                    console.print("  [dim]Nutzung: /remember <text>[/dim]")
+                else:
+                    mem.remember(arg, scope="long", importance=2.0)
+                    console.print(f"  [dim {_GREEN}]✓  Gemerkt.[/dim {_GREEN}]")
+
+            elif cmd == "/telegram":
+                _cmd_telegram_status(console)
 
             else:
                 console.print(f"  [dim {_AMBER_DIM}]?[/dim {_AMBER_DIM}]  [yellow]{cmd}[/yellow]  [dim]— /help für alle Befehle[/dim]")
