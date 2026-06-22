@@ -90,6 +90,25 @@ _LEARN_PATTERNS: list[tuple[str, list[str]]] = [
         r"geh davon aus(?:,)? dass ich\s+(.+?)(?:\.|$)",
         r"ich (?:bin\s+)?(?:ein\s+)?(?:erfahrener?|fortgeschrittener?|anfänger|beginner)\s+(.+)",
     ]),
+    ("soul.md", [
+        r"mein(?:e)?\s+(?:größter?\s+)?traum\s+(?:ist|war|wäre)\s+(.+?)(?:\.|$)",
+        r"ich träume (?:davon[,]?\s+)?(.+?)(?:\.|$)",
+        r"mein(?:e)?\s+(?:lebens)?ziel(?:e)?\s+(?:ist|sind|wäre)\s+(.+?)(?:\.|$)",
+        r"mir ist\s+(?:es\s+)?(?:am\s+)?wichtig(?:sten)?,?\s+(?:dass\s+)?(.+?)(?:\.|$)",
+        r"ich glaube\s+(?:fest\s+)?(?:daran[,]?\s+)?(?:dass\s+)?(.+?)(?:\.|$)",
+        r"ich stehe für\s+(.+?)(?:\.|$)",
+        r"was mich antreibt[,:]?\s+(?:ist\s+)?(.+?)(?:\.|$)",
+        r"ich lebe für\s+(.+?)(?:\.|$)",
+        r"meine\s+(?:größte\s+)?leidenschaft\s+(?:ist|sind)\s+(.+?)(?:\.|$)",
+        r"was mich begeistert[,:]?\s+(?:ist\s+)?(.+?)(?:\.|$)",
+        r"ich (?:hasse|verabscheue)\s+(.+?)(?:\.|$)",
+        r"meine werte?\s+(?:sind|ist)\s+(.+?)(?:\.|$)",
+        r"ich möchte\s+(?:eines\s+tages\s+)?(.+?)(?:\.|$)",
+        r"my (?:biggest\s+)?dream\s+(?:is|was)\s+(.+?)(?:\.|$)",
+        r"i (?:believe|stand for)\s+(.+?)(?:\.|$)",
+        r"what drives me\s+(?:is\s+)?(.+?)(?:\.|$)",
+        r"i (?:live|fight)\s+for\s+(.+?)(?:\.|$)",
+    ]),
 ]
 
 # Themen-Schlüsselwörter → interests.md
@@ -276,9 +295,14 @@ def _model_extract(conversation: str, model_fn) -> None:
     """Fragt das Modell nach lernbaren Fakten aus dem Gespräch."""
     try:
         prompt = (
-            "Analysiere dieses Gespräch und extrahiere maximal 5 kurze, konkrete Fakten "
-            "über den Nutzer oder wie der Assistent sich verhalten soll. "
-            "Format: eine Zeile pro Fakt, beginne jede Zeile mit USER: oder VERHALTEN: oder KORREKTUR: oder INTERESSE:\n\n"
+            "Analysiere dieses Gespräch und extrahiere maximal 7 kurze, konkrete Fakten "
+            "über den Nutzer oder wie der Assistent sich verhalten soll.\n"
+            "Format: eine Zeile pro Fakt, beginne jede Zeile mit einem dieser Präfixe:\n"
+            "  USER:      — sachliche Info über den Nutzer (Name, Beruf, Ort)\n"
+            "  VERHALTEN: — wie der Assistent sich verhalten soll\n"
+            "  KORREKTUR: — was falsch war oder nicht mehr passieren soll\n"
+            "  INTERESSE: — Themen oder Technologien die den Nutzer interessieren\n"
+            "  SEELE:     — Werte, Träume, Lebensphilosophie, tiefe Motivationen\n\n"
             f"{conversation[-3000:]}\n\n"
             "Fakten (oder NICHTS wenn keine erkennbar):"
         )
@@ -286,26 +310,29 @@ def _model_extract(conversation: str, model_fn) -> None:
         if not result or "NICHTS" in result.upper():
             return
 
-        user_facts, behavior_facts, correction_facts, interest_facts = [], [], [], []
+        buckets: dict[str, list[str]] = {
+            "user.md": [], "behavior.md": [], "corrections.md": [],
+            "interests.md": [], "soul.md": [],
+        }
+        _PREFIX_MAP = {
+            "USER:": "user.md",
+            "VERHALTEN:": "behavior.md",
+            "KORREKTUR:": "corrections.md",
+            "INTERESSE:": "interests.md",
+            "SEELE:": "soul.md",
+        }
         for line in result.splitlines():
             line = line.strip()
-            if line.startswith("USER:"):
-                user_facts.append(line[5:].strip())
-            elif line.startswith("VERHALTEN:"):
-                behavior_facts.append(line[10:].strip())
-            elif line.startswith("KORREKTUR:"):
-                correction_facts.append(line[10:].strip())
-            elif line.startswith("INTERESSE:"):
-                interest_facts.append(line[10:].strip())
+            for prefix, fname in _PREFIX_MAP.items():
+                if line.upper().startswith(prefix):
+                    fact = line[len(prefix):].strip()
+                    if fact:
+                        buckets[fname].append(fact)
+                    break
 
-        if user_facts:
-            _append_facts("user.md", user_facts)
-        if behavior_facts:
-            _append_facts("behavior.md", behavior_facts)
-        if correction_facts:
-            _append_facts("corrections.md", correction_facts)
-        if interest_facts:
-            _append_facts("interests.md", interest_facts)
+        for fname, facts in buckets.items():
+            if facts:
+                _append_facts(fname, facts)
     except Exception:
         pass
 

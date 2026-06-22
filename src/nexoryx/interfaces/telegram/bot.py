@@ -492,7 +492,7 @@ def _handle(token, chat_id, user_id, first_name, role, text, orch, memory, priva
             parts_out = ["📋 *Nutzer-Profil*\n"]
             _icons = {
                 "user.md": "👤", "behavior.md": "⚙️", "corrections.md": "✏️",
-                "interests.md": "🔍", "preferences.md": "🎨",
+                "interests.md": "🔍", "preferences.md": "🎨", "soul.md": "✦",
             }
             for fname, content in files.items():
                 icon = _icons.get(fname, "◆")

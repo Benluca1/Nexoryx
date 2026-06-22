@@ -690,6 +690,7 @@ def _cmd_profile(console: "Console", arg: str, is_admin: bool) -> None:
         "corrections.md": ("✏️ ", "Korrekturen"),
         "interests.md":   ("🔍", "Interessen & Themen"),
         "preferences.md": ("🎨", "Stil-Vorlieben"),
+        "soul.md":        ("✦ ", "Seele — Werte · Träume · Philosophie"),
     }
 
     if not files:
