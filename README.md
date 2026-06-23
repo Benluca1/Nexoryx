@@ -11,9 +11,7 @@ Terminal und Telegram steuerbar.
 curl -fsSL https://raw.githubusercontent.com/Benluca1/Nexoryx/main/install.sh | bash
 ```
 
-> Diese öffentliche Installation läuft im **User-Modus** (ohne Admin-Funktionen).
-> Admin-Funktionen gibt es nur bei Installation über den Heim-Server
-> (`http://192.168.13.100:3007`).
+.
 
 ### Voraussetzungen
 - Python 3.11+
