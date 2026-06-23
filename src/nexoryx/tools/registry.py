@@ -11,6 +11,13 @@ from typing import Callable
 from .audit import audit
 from .base import Tool, ToolContext, ToolResult
 from .code import GitTool, GlobTool, GrepTool
+from .browser import (
+    BrowserNavigateTool, BrowserScreenshotTool, BrowserClickTool,
+    BrowserFillTool, BrowserExtractTool,
+)
+from .computer import (
+    KeyPressTool, MouseClickTool, MouseMoveTool, ScreenshotTool, ScrollTool, TypeTextTool,
+)
 from .filesystem import FileReadTool, FileWriteTool
 from .permissions import check_permission
 from .terminal import TerminalTool
@@ -20,6 +27,10 @@ _TOOLS: dict[str, Tool] = {
     t.name: t for t in (
         TerminalTool(), FileReadTool(), FileWriteTool(),
         HttpFetchTool(), WebSearchTool(), GlobTool(), GrepTool(), GitTool(),
+        ScreenshotTool(), MouseClickTool(), MouseMoveTool(),
+        TypeTextTool(), KeyPressTool(), ScrollTool(),
+        BrowserNavigateTool(), BrowserScreenshotTool(), BrowserClickTool(),
+        BrowserFillTool(), BrowserExtractTool(),
     )
 }
 

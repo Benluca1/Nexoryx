@@ -19,7 +19,8 @@ from pathlib import Path
 
 CONFIG_DIR = Path(os.path.expanduser("~")) / ".nexoryx"
 CONFIG_PATH = CONFIG_DIR / "config.json"
-SECRETS_PATH = CONFIG_DIR / "secrets"
+SECRETS_PATH = CONFIG_DIR / "api_keys"
+_SECRETS_PATH_LEGACY = CONFIG_DIR / "secrets"  # pre-rename fallback
 
 ROLES = ("admin", "user", "guest")
 
@@ -31,9 +32,10 @@ class Config:
     profile: str = "balanced"
     telegram_admin_id: str = ""
     telegram_allowlist: dict[str, str] = field(default_factory=dict)  # id -> role
-    daily_budget: float = 0.0  # USD/Tag Cloud-Cap (0 = unbegrenzt)
-    persona: str = ""          # optionaler globaler System-Prompt-Zusatz
-    learn: bool = True         # Flywheel: jede Antwort als Trainingsdatum erfassen
+    daily_budget: float = 0.0   # USD/Tag Cloud-Cap (0 = unbegrenzt)
+    persona: str = ""           # optionaler globaler System-Prompt-Zusatz
+    learn: bool = True          # Flywheel: jede Antwort als Trainingsdatum erfassen
+    tool_auto_approve: bool = False  # confirm-Tools ohne Rückfrage ausführen (alle Rollen)
     house_base: str = ""       # hardware-gewähltes Start-Modell (Ollama-Tag)
     house_trained: bool = False  # eigenes Modell schon trainiert?
     house_version: int = 0
@@ -72,7 +74,7 @@ def save(cfg: Config) -> None:
 
 
 def load_secrets() -> dict[str, str]:
-    """Secrets aus ~/.nexoryx/secrets lesen (KEY=VALUE-Zeilen)."""
+    """Secrets aus ~/.nexoryx/api_keys lesen (KEY=VALUE-Zeilen)."""
     out: dict[str, str] = {}
     if not SECRETS_PATH.exists():
         return out

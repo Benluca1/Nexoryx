@@ -674,6 +674,13 @@ def _cmd_train(console: "Console") -> None:
     action = result.get("action", "?")
     if action == "trained":
         console.print(f"  [bold {_GREEN}]✓[/bold {_GREEN}]  Training abgeschlossen — Version {result.get('house_version')}")
+    elif action == "rejected":
+        ev = result.get("eval", {})
+        console.print(
+            f"  [{_YELLOW}]↩[/{_YELLOW}]  Eval-Gate: neue Version verworfen "
+            f"(Score {ev.get('candidate_score')} < {ev.get('incumbent_score')})."
+        )
+        console.print(f"  [dim]Bisheriges Modell {result.get('kept', '?')} bleibt aktiv.[/dim]")
     elif action == "script_generated":
         console.print(f"  [{_YELLOW}]◆[/{_YELLOW}]  Skript erzeugt: {result.get('script')}")
         console.print(f"  [dim]Fehlende Deps: {', '.join(result.get('deps_missing', []))}[/dim]")

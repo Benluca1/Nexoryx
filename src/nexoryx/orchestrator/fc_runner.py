@@ -77,6 +77,147 @@ _TOOL_DEFS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "screenshot",
+            "description": (
+                "Macht einen Screenshot des gesamten Bildschirms. "
+                "Nützlich um zu sehen was gerade auf dem PC passiert, "
+                "welche Fenster offen sind, oder um eine Aufgabe zu dokumentieren."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mouse_click",
+            "description": (
+                "Klickt mit der Maus an eine Bildschirmposition. "
+                "Erst screenshot machen um die Koordinaten zu sehen."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "x": {"type": "integer"},
+                    "y": {"type": "integer"},
+                    "button": {"type": "string", "default": "left"},
+                    "double": {"type": "boolean", "default": False},
+                },
+                "required": ["x", "y"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "type_text",
+            "description": "Tippt Text an der aktuellen Cursor-Position ein.",
+            "parameters": {
+                "type": "object",
+                "properties": {"text": {"type": "string"}},
+                "required": ["text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "key_press",
+            "description": (
+                "Drückt eine Taste oder Kombination. "
+                "Beispiele: 'enter', 'ctrl+c', 'alt+tab', 'ctrl+shift+t', 'super'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"keys": {"type": "string"}},
+                "required": ["keys"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_navigate",
+            "description": (
+                "Öffnet eine URL im Headless-Chromium und gibt Titel + Text zurück. "
+                "Ideal um Webseiten zu lesen, Preise zu prüfen, Artikel zu holen."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string"},
+                    "wait_for": {"type": "string"},
+                },
+                "required": ["url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_screenshot",
+            "description": "Macht einen Screenshot einer Webseite (headless Chromium).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string"},
+                    "full_page": {"type": "boolean"},
+                },
+                "required": ["url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_extract",
+            "description": "Extrahiert Elemente per CSS-Selektor aus einer Webseite.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string"},
+                    "selector": {"type": "string"},
+                    "limit": {"type": "integer"},
+                },
+                "required": ["url", "selector"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_click",
+            "description": "Klickt auf ein Element einer Webseite per CSS-Selektor.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string"},
+                    "selector": {"type": "string"},
+                    "text_after": {"type": "boolean"},
+                },
+                "required": ["url", "selector"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_fill",
+            "description": "Füllt ein Formularfeld auf einer Webseite aus.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string"},
+                    "selector": {"type": "string"},
+                    "value": {"type": "string"},
+                    "submit": {"type": "boolean"},
+                },
+                "required": ["url", "selector", "value"],
+            },
+        },
+    },
 ]
 
 

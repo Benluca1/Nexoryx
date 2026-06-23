@@ -7,11 +7,12 @@ from dataclasses import dataclass, field
 
 @dataclass
 class ToolContext:
-    role: str = "user"          # owner/admin | user | guest
-    project_root: str = ""      # FS-Jail-Wurzel
-    actor: str = "cli"          # cli | telegram:<id>
-    auto_approve: bool = False   # Approve/Deny-Gate überspringen (z. B. Admin)
+    role: str = "user"           # owner/admin | user | guest
+    project_root: str = ""       # FS-Jail-Wurzel
+    actor: str = "cli"           # cli | telegram:<id>
+    auto_approve: bool = False   # confirm-Tools ohne Rückfrage (alle Rollen außer guest)
     sandbox: bool = True         # False = direkter subprocess (kein bwrap/firejail)
+    allow_computer: bool = False # Maus/Tastatur-Injection explizit erlaubt
 
 
 @dataclass

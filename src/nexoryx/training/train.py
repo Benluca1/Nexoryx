@@ -4,8 +4,10 @@ Primärer Weg — Ollama Modelfile (kein GPU, kein Download, sofort):
   1. Top-N Trainingsbeispiele aus dem Dataset wählen (Teacher/Cloud bevorzugt)
   2. Ollama Modelfile schreiben: FROM qwen2.5:0.5b + SYSTEM + MESSAGE-Paare
   3. `ollama create nexoryx-house-vN -f Modelfile` ausführen
-  4. Config aktualisieren: house_base = nexoryx-house-vN, house_trained = True
-  → Nexoryx nutzt danach automatisch das trainierte Modell
+  4. Eval-Gate (eval.py): vN gegen das bisherige Modell auf Holdout testen
+  5. Nur bei Bestehen: Config aktualisieren (house_base = vN, house_trained = True);
+     sonst Rollback — vN wird verworfen, altes Modell bleibt aktiv
+  → Nexoryx nutzt danach automatisch das beste Modell
 
 Sekundärer Weg — LoRA Fine-Tuning via HuggingFace (GPU empfohlen):
   Nur wenn Ollama nicht verfügbar. Generiert ein Trainings-Skript.
@@ -60,16 +62,86 @@ def train_report() -> dict:
 
 # ── Ollama-Modelfile-Weg ──────────────────────────────────────────────────────
 
+def _first(ex: dict, role: str) -> str:
+    for m in ex.get("messages", []):
+        if m.get("role") == role:
+            return m.get("content", "")
+    return ""
+
+
+def _quality_ok(ex: dict) -> bool:
+    """Filtert leere, zu kurze oder offensichtlich fehlerhafte Beispiele aus."""
+    user = _first(ex, "user").strip()
+    answer = _first(ex, "assistant").strip()
+    if len(user) < 3 or len(answer) < 15:
+        return False
+    low = answer.lower()
+    if low.startswith(("fehler", "error:", "entschuldigung, ich kann")):
+        return False
+    return True
+
+
+def _diversify(examples: list[dict], limit: int) -> list[dict]:
+    """Round-Robin über task_type → thematische Vielfalt im Few-Shot-Set.
+
+    Erwartet bereits nach Aktualität sortierte Eingabe; die Bucket-Reihenfolge
+    bleibt dadurch erhalten (neueste zuerst).
+    """
+    buckets: dict[str, list[dict]] = {}
+    for ex in examples:
+        buckets.setdefault(ex.get("task_type", "chat"), []).append(ex)
+    out: list[dict] = []
+    while len(out) < limit and any(buckets.values()):
+        for key in list(buckets):
+            if buckets[key]:
+                out.append(buckets[key].pop(0))
+                if len(out) >= limit:
+                    break
+    return out
+
+
 def _select_examples(max_n: int = 30) -> list[dict]:
-    """Wählt die besten Trainingsbeispiele (Teacher zuerst, dann lokal)."""
-    teacher, local = [], []
+    """Wählt die besten Trainingsbeispiele.
+
+    Wichtig fürs Flywheel: die NEUESTEN Daten müssen einfließen, sonst bäckt
+    jedes Retraining dieselben alten Beispiele ein. Dedupliziert, filtert
+    Müll heraus, bevorzugt Teacher (Cloud), sorgt für task_type-Vielfalt und
+    begrenzt synthetische Beispiele auf max. 20 %.
+    """
+    from . import eval as eval_gate
+    holdout = eval_gate.holdout_keys()  # nie auf Trainingsdaten evaluieren
+
+    seen: set[tuple[str, str]] = set()
+    teacher: list[dict] = []
+    local: list[dict] = []
+    synthetic: list[dict] = []
     for ex in dataset.iter_examples():
-        (teacher if ex.get("teacher") else local).append(ex)
-    # Teacher bevorzugen; Rest auffüllen
-    selected = teacher[:max_n]
+        if not _quality_ok(ex):
+            continue
+        key = (_first(ex, "user").strip().lower(),
+               _first(ex, "assistant").strip().lower())
+        if key in seen or key in holdout:
+            continue
+        seen.add(key)
+        if ex.get("provider") == "synthetic":
+            synthetic.append(ex)
+        elif ex.get("teacher"):
+            teacher.append(ex)
+        else:
+            local.append(ex)
+
+    # neueste zuerst — der Kern des Fixes
+    for lst in (teacher, local, synthetic):
+        lst.sort(key=lambda e: e.get("ts", 0.0), reverse=True)
+
+    selected = _diversify(teacher, max_n)
     if len(selected) < max_n:
-        selected += local[: max_n - len(selected)]
-    return selected
+        selected += _diversify(local, max_n - len(selected))
+    if len(selected) < max_n and synthetic:
+        synth_cap = max(1, max_n // 5)
+        room = min(synth_cap, max_n - len(selected))
+        selected += synthetic[:room]
+    return selected[:max_n]
 
 
 def _build_modelfile(base_tag: str, examples: list[dict]) -> str:
@@ -123,12 +195,28 @@ def _train_ollama(base_tag: str, version: int) -> dict:
         err = (result.stderr or result.stdout).strip()[:400]
         return {"action": "failed", "error": err}
 
+    # Alte Versionen aufräumen — nur die letzten beiden behalten (Platz sparen)
+    _cleanup_old_versions(keep_from=version - 1)
+
     return {
         "action": "trained",
         "model_name": model_name,
         "modelfile": str(mf_path),
         "examples_used": len(examples),
     }
+
+
+def _ollama_rm(tag: str) -> None:
+    try:
+        subprocess.run(["ollama", "rm", tag], capture_output=True, timeout=15)
+    except Exception:
+        pass
+
+
+def _cleanup_old_versions(keep_from: int) -> None:
+    """Entfernt nexoryx-house-vN-Modelle älter als `keep_from` aus Ollama."""
+    for old in range(max(0, keep_from - 1), 0, -1):
+        _ollama_rm(f"nexoryx-house-v{old}")
 
 
 # ── LoRA-Skript-Weg (Fallback) ────────────────────────────────────────────────
@@ -201,11 +289,30 @@ def train(repo_root: Path | None = None) -> dict:
         result = _train_ollama(base_tag, next_version)
         report.update(result)
         if result["action"] == "trained":
-            cfg.house_base = result["model_name"]
-            cfg.house_trained = True
-            cfg.house_version = next_version
-            cfg_mod.save(cfg)
-            report["house_version"] = next_version
+            candidate = result["model_name"]
+            incumbent = cfg.house_base or base_tag
+
+            # Eval-Gate (Plan §3.3.5): nur aktivieren, wenn nicht schlechter
+            try:
+                from . import eval as eval_gate
+                verdict = eval_gate.gate(candidate, incumbent)
+            except Exception as exc:  # Eval-Infra darf Training nie blockieren
+                verdict = {"promote": True, "reason": f"Eval-Fehler ({exc}) — Promotion",
+                           "candidate_score": None, "incumbent_score": None}
+            report["eval"] = verdict
+
+            if verdict["promote"]:
+                cfg.house_base = candidate
+                cfg.house_trained = True
+                cfg.house_version = next_version
+                cfg_mod.save(cfg)
+                report["house_version"] = next_version
+            else:
+                # Rollback: Kandidat verwerfen, bisheriges Modell behalten
+                _ollama_rm(candidate)
+                report["action"] = "rejected"
+                report["kept"] = incumbent
+                report["house_version"] = cfg.house_version
         return report
 
     # ── Fallback: LoRA-Skript generieren (GPU-Pfad) ────────────────────────

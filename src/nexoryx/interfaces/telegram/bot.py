@@ -373,6 +373,15 @@ def _handle(token, chat_id, user_id, first_name, role, text, orch, memory, priva
                         v = result.get("house_version", "?")
                         _notify_telegram(f"✅ *Auto-Training abgeschlossen* — Version {v}")
                         _save_last_count(total)
+                    elif action == "rejected":
+                        ev = result.get("eval", {})
+                        _notify_telegram(
+                            f"↩️ *Auto-Training: neue Version verworfen*\n"
+                            f"Eval-Gate: Kandidat {ev.get('candidate_score')} "
+                            f"< Baseline {ev.get('incumbent_score')}.\n"
+                            f"Bisheriges Modell bleibt aktiv."
+                        )
+                        _save_last_count(total)
                     elif action == "script_generated":
                         deps_str = ", ".join(result.get("deps_missing", []))
                         _notify_telegram(

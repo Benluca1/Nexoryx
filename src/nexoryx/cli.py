@@ -253,6 +253,21 @@ def cmd_train_background(_args: argparse.Namespace) -> int:
                 f"`{result.get('instructions', '')}`"
             )
             _save_last_count(total)
+        elif action == "rejected":
+            ev = result.get("eval", {})
+            _log(
+                f"Eval-Gate: neue Version verworfen "
+                f"(Kandidat {ev.get('candidate_score')} < Baseline {ev.get('incumbent_score')}). "
+                f"Behalte {result.get('kept', '?')}."
+            )
+            _notify_telegram(
+                f"↩️ *Training: neue Version verworfen*\n"
+                f"Eval-Gate: Kandidat {ev.get('candidate_score')} "
+                f"< Baseline {ev.get('incumbent_score')}.\n"
+                f"Bisheriges Modell bleibt aktiv."
+            )
+            # Zähler vorrücken: gleiche Daten würden erneut abgelehnt.
+            _save_last_count(total)
         elif action == "skipped":
             _log(f"Übersprungen: {result.get('reason', '?')}")
         elif action == "failed":

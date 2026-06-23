@@ -1,7 +1,7 @@
 """Automatischer Trainings-Scheduler — läuft als Hintergrund-Thread im Daemon.
 
-Prüft stündlich ob genug neue Daten vorliegen und löst das Training des
-Hausmodells automatisch aus. Benachrichtigt per Telegram wenn Training
+Prüft stündlich ob genug neue Daten vorliegen und startet dann den
+TrainingAgent im Hintergrund. Benachrichtigt per Telegram wenn Training
 startet oder abgeschlossen ist.
 """
 
@@ -10,6 +10,11 @@ from __future__ import annotations
 import threading
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..router import Router
+    from ..orchestrator.bus import Bus
 
 _CHECK_INTERVAL = 3600      # jede Stunde prüfen
 _MIN_NEW_EXAMPLES = 50      # Mindestanzahl neuer Beispiele seit letztem Training
@@ -31,7 +36,7 @@ def _save_last_count(n: int) -> None:
 def _notify_telegram(message: str) -> None:
     try:
         from ..platform import config as cfg_mod
-        from ..interfaces.telegram.bot import _api, _send
+        from ..interfaces.telegram.bot import _send
         token = cfg_mod.get_key("TELEGRAM_BOT_TOKEN")
         if not token:
             return
@@ -43,85 +48,100 @@ def _notify_telegram(message: str) -> None:
         pass
 
 
-def _run_scheduler(stop_event: threading.Event) -> None:
+def _run_scheduler(stop_event: threading.Event,
+                   router: "Router | None",
+                   bus: "Bus | None") -> None:
     print("[AutoTrainer] Scheduler gestartet — prüfe stündlich auf neue Trainingsdaten.")
     while not stop_event.is_set():
         try:
-            _check_and_train()
+            _check_and_train(router, bus)
         except Exception as exc:
             print(f"[AutoTrainer] Fehler: {exc}")
         stop_event.wait(_CHECK_INTERVAL)
 
 
-def _check_and_train() -> None:
+def _check_and_train(router: "Router | None", bus: "Bus | None") -> None:
     from . import dataset
-    from .train import train, MIN_EXAMPLES
+    from .train import MIN_EXAMPLES
+    from ..agents.training import TrainingAgent
 
     stats = dataset.stats()
     total = stats["total"]
     last_count = _load_last_count()
     new_since_last = total - last_count
 
-    print(f"[AutoTrainer] Datensatz: {total} Beispiele gesamt, {new_since_last} neu seit letztem Training.")
+    print(
+        f"[AutoTrainer] Datensatz: {total} Beispiele gesamt, "
+        f"{new_since_last} neu seit letztem Training."
+    )
 
     if total < MIN_EXAMPLES:
         print(f"[AutoTrainer] Noch {MIN_EXAMPLES - total} Beispiele bis Mindestanzahl — übersprungen.")
         return
 
     if new_since_last < _MIN_NEW_EXAMPLES:
-        print(f"[AutoTrainer] Nur {new_since_last} neue Beispiele (min. {_MIN_NEW_EXAMPLES}) — warte auf mehr Daten.")
+        print(
+            f"[AutoTrainer] Nur {new_since_last} neue Beispiele "
+            f"(min. {_MIN_NEW_EXAMPLES}) — warte auf mehr Daten."
+        )
         return
 
-    print(f"[AutoTrainer] Starte automatisches Training ({total} Beispiele, {new_since_last} neu) …")
+    print(
+        f"[AutoTrainer] Starte TrainingAgent "
+        f"({total} Beispiele, {new_since_last} neu) …"
+    )
     _notify_telegram(
         f"🏋️ *Auto-Training gestartet*\n"
         f"Datensatz: {total} Beispiele ({new_since_last} neu)\n"
         f"Läuft im Hintergrund …"
     )
 
-    try:
-        out_dir = Path.home() / ".nexoryx" / "auto_training"
-        result = train(repo_root=out_dir)
-        action = result.get("action", "?")
+    agent = TrainingAgent(router=router, bus=bus)
+    out_dir = Path.home() / ".nexoryx" / "auto_training"
 
-        if action == "trained":
-            version = result.get("house_version", "?")
-            print(f"[AutoTrainer] Training abgeschlossen — Version {version}")
+    def _on_done(n: int, result: dict) -> None:
+        # Zähler immer vorrücken (auch bei Ablehnung), sonst Endlos-Retry.
+        _save_last_count(n)
+        action = result.get("action", "")
+        if action == "rejected":
+            ev = result.get("eval", {})
+            _notify_telegram(
+                f"↩️ *Auto-Training: neue Version verworfen*\n"
+                f"Eval-Gate: Kandidat {ev.get('candidate_score')} "
+                f"< Baseline {ev.get('incumbent_score')}.\n"
+                f"Bisheriges Modell `{result.get('kept', '?')}` bleibt aktiv."
+            )
+        elif action == "trained":
+            ev = result.get("eval", {})
+            score = ev.get("candidate_score")
             _notify_telegram(
                 f"✅ *Auto-Training abgeschlossen*\n"
-                f"Hausmodell Version {version} trainiert."
+                f"Hausmodell v{result.get('house_version', '?')} aktiviert "
+                f"({n} Beispiele"
+                + (f", Eval-Score {score}" if score is not None else "") + ")."
             )
-            _save_last_count(total)
-
         elif action == "script_generated":
             deps = ", ".join(result.get("deps_missing", []))
-            print(f"[AutoTrainer] Training-Skript erzeugt (fehlende Deps: {deps})")
             _notify_telegram(
                 f"📝 *Auto-Training: Skript erzeugt*\n"
-                f"Fehlende Pakete: {deps}\n"
-                f"Führe aus: {result.get('instructions', '')}"
+                f"Fehlende Pakete: {deps or '–'}\n"
+                f"Ausführen: `{result.get('instructions', '')}`"
             )
-            _save_last_count(total)
 
-        elif action == "skipped":
-            print(f"[AutoTrainer] Übersprungen: {result.get('reason', '?')}")
-
-        elif action == "failed":
-            err = result.get("error", "?")
-            print(f"[AutoTrainer] Training fehlgeschlagen: {err}")
-            _notify_telegram(f"❌ *Auto-Training fehlgeschlagen*\n{err}")
-
-    except Exception as exc:
-        print(f"[AutoTrainer] Ausnahme während Training: {exc}")
-        _notify_telegram(f"❌ *Auto-Training Ausnahme:* {exc}")
+    thread = agent.run_background(repo_root=out_dir, on_success=_on_done)
+    if thread is None:
+        print("[AutoTrainer] Training läuft bereits — dieser Zyklus übersprungen.")
 
 
-def start_background() -> threading.Thread:
+def start_background(
+    router: "Router | None" = None,
+    bus: "Bus | None" = None,
+) -> threading.Thread:
     """Startet den automatischen Trainings-Scheduler als Daemon-Thread."""
     stop_event = threading.Event()
     t = threading.Thread(
         target=_run_scheduler,
-        args=(stop_event,),
+        args=(stop_event, router, bus),
         daemon=True,
         name="nexoryx-auto-trainer",
     )

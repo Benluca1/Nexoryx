@@ -33,10 +33,11 @@ def _load_server_secret() -> str:
         return ""
 
 
-def _build_handler():
+def _build_handler(router: Router | None = None):
     hw = detect()
     profile = choose_profile(hw)
-    router = Router(hw, profile)
+    if router is None:
+        router = Router(hw, profile)
     cfg = cfg_mod.load()
     server_secret = _load_server_secret()
 
@@ -145,6 +146,11 @@ def _build_handler():
 
 
 def serve(host: str = "127.0.0.1", port: int = 3008) -> None:
+    # Router einmal bauen — wird von Handler und Scheduler geteilt
+    hw = detect()
+    profile = choose_profile(hw)
+    shared_router = Router(hw, profile)
+
     try:
         from ..platform.scanner import check_pending, start_background_scan
         check_pending()
@@ -163,15 +169,17 @@ def serve(host: str = "127.0.0.1", port: int = 3008) -> None:
     except Exception as exc:
         print(f"Telegram-Bot: Fehler beim Start — {exc}")
 
-    # Auto-Trainer-Scheduler im Hintergrund starten
+    # Auto-Trainer-Scheduler im Hintergrund starten (Router + Bus übergeben)
     try:
+        from ..orchestrator.bus import Bus as _Bus
         from ..training.scheduler import start_background as _trainer_start
-        _trainer_start()
+        _daemon_bus = _Bus()
+        _trainer_start(router=shared_router, bus=_daemon_bus)
         print("Auto-Trainer: gestartet (prüft stündlich auf neue Trainingsdaten)")
     except Exception as exc:
         print(f"Auto-Trainer: Fehler beim Start — {exc}")
 
-    handler = _build_handler()
+    handler = _build_handler(router=shared_router)
     httpd = ThreadingHTTPServer((host, port), handler)
     print(f"nexoryxd läuft auf http://{host}:{port}  (Ctrl-C zum Beenden)")
     try:
