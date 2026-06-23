@@ -71,6 +71,8 @@ def _build_handler(router: Router | None = None):
                     "gpu": hw.gpu.vendor,
                     "models": models,
                 })
+            if self.path == "/training/status":
+                return self._handle_training_status()
             return self._send(404, {"error": "not found"})
 
         def do_POST(self):
@@ -83,6 +85,8 @@ def _build_handler(router: Router | None = None):
                 return self._handle_ask(data)
             if self.path == "/training/upload":
                 return self._handle_training(data)
+            if self.path == "/memory/search":
+                return self._handle_memory_search(data)
             return self._send(404, {"error": "not found"})
 
         def _handle_ask(self, data: dict):
@@ -141,6 +145,36 @@ def _build_handler(router: Router | None = None):
             threading.Thread(target=_push, daemon=True).start()
 
             return self._send(200, {"ok": True, "device": device, "lines": n})
+
+        def _handle_training_status(self):
+            try:
+                from ..training.dataset import stats
+                st = stats()
+            except Exception:
+                st = {}
+            return self._send(200, {
+                "house_trained":  cfg.house_trained,
+                "house_version":  cfg.house_version,
+                "house_base":     cfg.house_base,
+                "dataset_size":   st.get("total", 0),
+            })
+
+        def _handle_memory_search(self, data: dict):
+            query = str(data.get("query") or "").strip()
+            if not query:
+                return self._send(400, {"error": "query fehlt"})
+            try:
+                from ..memory.store import MemoryStore
+                mem = MemoryStore()
+                results = mem.recall(query, limit=10)
+                return self._send(200, {
+                    "results": [
+                        {"text": m.text, "scope": m.scope}
+                        for m in results
+                    ]
+                })
+            except Exception as exc:
+                return self._send(500, {"error": str(exc)})
 
     return Handler
 

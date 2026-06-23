@@ -624,6 +624,18 @@ def cmd_telegram(_args: argparse.Namespace) -> int:
     return run_bot()
 
 
+def cmd_gui(_args: argparse.Namespace) -> int:
+    try:
+        from .interfaces.gui import run as _gui_run
+        return _gui_run()
+    except ImportError as exc:
+        print(_c(f"GUI nicht verfügbar: {exc}", _RED))
+        print(_c("  pip install pywebview", _DIM))
+        if sys.platform == "linux":
+            print(_c("  Linux: sudo apt install python3-gi python3-gi-cairo gir1.2-webkit2-4.1", _DIM))
+        return 1
+
+
 # --- Admin (gated, Plan §16) ----------------------------------------------
 
 
@@ -824,6 +836,7 @@ def build_parser() -> argparse.ArgumentParser:
     dmn.set_defaults(func=cmd_daemon)
 
     sub.add_parser("telegram", help="Telegram-Bot starten").set_defaults(func=cmd_telegram)
+    sub.add_parser("gui", help="Desktop-GUI öffnen (für nicht-technische Nutzer)").set_defaults(func=cmd_gui)
 
     # keys — für alle Geräte, kein Admin-Gate
     keys_top = sub.add_parser("keys", help="API-Keys + GitHub-PAT verwalten (alle Geräte)")

@@ -391,6 +391,102 @@ def _install_systemd_service() -> None:
     _ok(f"Log: ~/.nexoryx/daemon.log  ·  Status: systemctl --user status nexoryx-daemon")
 
 
+def _install_gui_deps() -> None:
+    """pywebview + system-WebKit installieren (Desktop-GUI)."""
+    print(f"\n  {_B}Desktop-GUI (pywebview){_RST}")
+
+    if sys.platform == "linux":
+        # WebKit2GTK als System-Paket (apt); kein pip
+        webkit_ok = False
+        try:
+            import gi  # type: ignore
+            gi.require_version("WebKit2", "4.1")
+            from gi.repository import WebKit2  # noqa: F401
+            webkit_ok = True
+            _ok("WebKit2GTK 4.1 vorhanden")
+        except Exception:
+            pass
+
+        if not webkit_ok:
+            # Fallback: 4.0
+            try:
+                gi.require_version("WebKit2", "4.0")
+                from gi.repository import WebKit2  # noqa: F401
+                webkit_ok = True
+                _ok("WebKit2GTK 4.0 vorhanden")
+            except Exception:
+                pass
+
+        if not webkit_ok:
+            _warn("WebKit2GTK nicht gefunden — versuche apt-Installation …")
+            for pkg in ["python3-gi-cairo", "gir1.2-webkit2-4.1", "gir1.2-webkit2-4.0"]:
+                try:
+                    subprocess.run(
+                        ["sudo", "apt-get", "install", "-y", "-qq", pkg],
+                        capture_output=True, timeout=90, check=False,
+                    )
+                except Exception:
+                    pass
+            _ok("WebKit2GTK-Installation versucht (ggf. manuell: sudo apt install gir1.2-webkit2-4.1)")
+
+    if not _can_import("webview"):
+        if _pip("pywebview>=5.0"):
+            _ok("pywebview installiert")
+        else:
+            _warn("pywebview konnte nicht installiert werden — GUI startet mit: pip install pywebview")
+    else:
+        _ok("pywebview vorhanden")
+
+
+def _create_desktop_entry() -> None:
+    """Erstellt .desktop-Datei für Linux-App-Launcher + Desktop-Verknüpfung."""
+    if sys.platform != "linux":
+        return
+
+    venv_bin = Path(sys.executable).parent
+    gui_bin = venv_bin / "nexoryx-gui"
+    if not gui_bin.exists():
+        # Entry-Point wurde noch nicht installiert → nach reinstall verfügbar
+        _warn("nexoryx-gui noch nicht im PATH — Desktop-Eintrag wird nach 'pip install -e .[gui]' erstellt")
+        return
+
+    icon_src = _REPO_ROOT / "src" / "nexoryx" / "interfaces" / "gui" / "static" / "icon.png"
+    icon_dir = Path.home() / ".local" / "share" / "icons" / "nexoryx"
+    icon_dir.mkdir(parents=True, exist_ok=True)
+    icon_dest = icon_dir / "nexoryx.png"
+    if icon_src.exists():
+        shutil.copy2(icon_src, icon_dest)
+
+    desktop_content = (
+        "[Desktop Entry]\n"
+        "Name=Nexoryx\n"
+        "Comment=Dein persönlicher KI-Assistent\n"
+        f"Exec={gui_bin}\n"
+        f"Icon={icon_dest}\n"
+        "Terminal=false\n"
+        "Type=Application\n"
+        "Categories=Utility;\n"
+        "StartupWMClass=nexoryx\n"
+    )
+
+    apps_dir = Path.home() / ".local" / "share" / "applications"
+    apps_dir.mkdir(parents=True, exist_ok=True)
+    desktop_file = apps_dir / "nexoryx.desktop"
+    desktop_file.write_text(desktop_content, encoding="utf-8")
+    desktop_file.chmod(0o644)
+    _ok(f"App-Eintrag: {desktop_file}")
+
+    desktop_dir = Path.home() / "Desktop"
+    if desktop_dir.is_dir():
+        link = desktop_dir / "Nexoryx.desktop"
+        shutil.copy2(desktop_file, link)
+        try:
+            link.chmod(0o755)
+        except OSError:
+            pass
+        _ok("Verknüpfung auf dem Desktop erstellt")
+
+
 # ── Hauptprogramm ──────────────────────────────────────────────────────────────
 
 def main() -> int:
@@ -557,6 +653,10 @@ def main() -> int:
     # 7) Systemd-User-Service installieren + aktivieren (Linux only)
     _install_systemd_service()
 
+    # 7b) Desktop-GUI: pywebview + Desktop-Eintrag
+    _install_gui_deps()
+    _create_desktop_entry()
+
     # 8) PATH in Shell-Config eintragen (idempotent, nur wenn nötig)
     venv_bin = Path(sys.executable).parent
     path_line = f'export PATH="{venv_bin}:$PATH"'
@@ -583,10 +683,10 @@ def main() -> int:
   {_B}Rolle:{_RST}  {_C}{role}{_RST}  ·  Profil: {_C}{profile.name}{_RST}  ·  Install: {inst}
 {shell_hint}
   {_B}Loslegen:{_RST}
-    {_C}nex{_RST}                   TUI starten (Fragen stellen)
+    {_C}nexoryx-gui{_RST}           Desktop-GUI öffnen  ← empfohlen für Einsteiger
+    {_C}nex{_RST}                   TUI starten (Terminal)
     {_C}nexoryx doctor{_RST}        Hardware + Profil + Modelle prüfen
     {_C}nexoryx chat{_RST}          Interaktiver Chat starten
-    {_C}nexoryx models list{_RST}   Verfügbare Modelle anzeigen
 
   {_DIM}Lokales Modell ziehen:  nexoryx models pull house{_RST}
   {_DIM}Cloud-Key setzen:       nexoryx admin keys set anthropic{_RST}

@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nexoryx</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ── Splash ────────────────────────────────────────────────────────────── -->
+<div id="splash" class="splash">
+  <div class="splash-logo">NX</div>
+  <h1 class="splash-title">Nexoryx</h1>
+  <p id="splash-msg" class="splash-msg">Starte Dienst&hellip;</p>
+  <div class="dots"><span></span><span></span><span></span></div>
+</div>
+
+<!-- ── Onboarding ────────────────────────────────────────────────────────── -->
+<div id="onboarding" class="onboarding hidden">
+
+  <!-- Schritt 1: Willkommen -->
+  <div id="step-welcome" class="step active">
+    <div class="step-icon">✦</div>
+    <h2>Willkommen bei Nexoryx</h2>
+    <p class="step-desc">
+      Dein persönlicher KI-Assistent. Läuft lokal und in der Cloud —
+      du entscheidest, wie viel Privatsphäre du willst.
+    </p>
+    <button class="btn-primary" onclick="nextStep()">Los geht&rsquo;s &rarr;</button>
+  </div>
+
+  <!-- Schritt 2: API-Keys -->
+  <div id="step-keys" class="step hidden">
+    <div class="step-icon">🔑</div>
+    <h2>API-Keys (optional)</h2>
+    <p class="step-desc">
+      Nexoryx wählt automatisch das beste Modell. Ohne Keys läuft
+      alles lokal über Ollama — so bleibt alles auf deinem Gerät.
+    </p>
+    <div class="key-inputs">
+      <label>Anthropic Claude <span class="chip">Empfohlen</span></label>
+      <input id="key-anthropic" type="password" placeholder="sk-ant-…" autocomplete="off">
+      <label>OpenAI GPT-4o</label>
+      <input id="key-openai" type="password" placeholder="sk-…" autocomplete="off">
+      <label>Google Gemini</label>
+      <input id="key-gemini" type="password" placeholder="AIza…" autocomplete="off">
+    </div>
+    <div class="step-actions">
+      <button class="btn-primary" onclick="saveKeysAndNext()">Weiter &rarr;</button>
+      <button class="btn-ghost" onclick="nextStep()">Überspringen</button>
+    </div>
+  </div>
+
+  <!-- Schritt 3: Erste Nachricht -->
+  <div id="step-first" class="step hidden">
+    <div class="step-icon">💬</div>
+    <h2>Schreib deine erste Nachricht</h2>
+    <p class="step-desc">
+      Frag mich alles — Code, Texte, Recherche, Planung, Erklärungen.
+      Ich passe mich deiner Hardware an.
+    </p>
+    <div class="first-input-row">
+      <input id="first-msg" type="text"
+             placeholder="Hallo! Was kannst du für mich tun?"
+             onkeydown="if(event.key==='Enter') sendFirstMsg()">
+      <button class="btn-primary" onclick="sendFirstMsg()">Senden ✦</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── Haupt-App ─────────────────────────────────────────────────────────── -->
+<div id="app" class="app hidden">
+
+  <!-- Seitenleiste -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">NX</div>
+    <nav class="sidebar-nav">
+      <button class="nav-btn active" data-view="chat" title="Chat"
+              onclick="switchView('chat', this)">
+        <!-- Chat-Icon -->
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+        </svg>
+      </button>
+      <button class="nav-btn" data-view="settings" title="Einstellungen"
+              onclick="switchView('settings', this)">
+        <!-- Zahnrad-Icon -->
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      </button>
+    </nav>
+  </aside>
+
+  <!-- Chat-Bereich -->
+  <main id="view-chat" class="chat-view">
+    <header class="chat-header">
+      <span class="chat-title">Nexoryx</span>
+      <div class="status-bar">
+        <span id="st-profile" class="st-chip" title="Hardware-Profil">—</span>
+        <span id="st-model"   class="st-chip" title="Aktives Modell">—</span>
+        <span id="st-dot" class="st-dot" title="Verbindung">●</span>
+      </div>
+    </header>
+
+    <div id="messages" class="messages">
+      <!-- Willkommens-Hinweis (wird beim ersten echten Nachrichten-Austausch entfernt) -->
+      <div id="empty-hint" class="empty-hint">
+        <div class="empty-logo">NX</div>
+        <p>Stell mir eine Frage — ich bin bereit.</p>
+      </div>
+    </div>
+
+    <footer class="input-area">
+      <textarea id="chat-input" rows="1"
+                placeholder="Schreib etwas… (Enter = senden, Shift+Enter = Zeilenumbruch)"
+      ></textarea>
+      <button id="send-btn" class="send-btn" title="Senden">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="22" y1="2" x2="11" y2="13"/>
+          <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+        </svg>
+      </button>
+    </footer>
+  </main>
+
+  <!-- Einstellungen -->
+  <main id="view-settings" class="settings-view hidden">
+    <div class="settings-scroll">
+      <h2 class="settings-title">Einstellungen</h2>
+
+      <section class="settings-section">
+        <h3>API-Keys</h3>
+        <p class="settings-hint">
+          Keys werden verschlüsselt in <code>~/.nexoryx/api_keys</code> gespeichert.
+        </p>
+        <label>Anthropic Claude <span class="chip">Empfohlen</span></label>
+        <input id="set-anthropic" type="password" placeholder="sk-ant-… (leer lassen = unverändert)" autocomplete="off">
+        <label>OpenAI GPT-4o</label>
+        <input id="set-openai" type="password" placeholder="sk-… (leer lassen = unverändert)" autocomplete="off">
+        <label>Google Gemini</label>
+        <input id="set-gemini" type="password" placeholder="AIza… (leer lassen = unverändert)" autocomplete="off">
+      </section>
+
+      <section class="settings-section">
+        <h3>Verhalten</h3>
+        <label>Tages-Budget für Cloud-APIs (USD, 0 = kein Limit)</label>
+        <input id="set-budget" type="number" step="0.5" min="0" value="0">
+        <label>Persönlichkeits-Zusatz (System-Prompt-Erweiterung)</label>
+        <textarea id="set-persona" rows="4"
+                  placeholder="z. B.: Antworte immer auf Deutsch. Sei prägnant und direkt."></textarea>
+      </section>
+
+      <section class="settings-section" id="section-status">
+        <h3>System-Info</h3>
+        <div id="sys-info" class="sys-info">Lädt&hellip;</div>
+      </section>
+
+      <div class="settings-actions">
+        <button class="btn-primary" onclick="saveSettings()">Einstellungen speichern</button>
+        <p id="save-msg" class="save-msg hidden">✓ Gespeichert</p>
+      </div>
+    </div>
+  </main>
+
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
