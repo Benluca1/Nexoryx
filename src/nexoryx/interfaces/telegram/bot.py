@@ -164,16 +164,12 @@ def start_background() -> threading.Thread | None:
         while not stop_event.is_set():
             try:
                 rc = run_bot(stop_event=stop_event)
-            except Exception as exc:
+            except Exception:
                 rc = 2
-                print(f"[Telegram] Bot abgestürzt: {exc}")
             if stop_event.is_set():
                 break
             if rc == 1:
-                # Konfigurationsfehler — nicht wiederholen, nur warten
-                print(f"[Telegram] Bot-Konfigurationsfehler — nächster Versuch in {delay}s")
-            else:
-                print(f"[Telegram] Bot beendet (rc={rc}) — Neustart in {delay}s …")
+                break  # Konfigurationsfehler → nicht neu starten
             time.sleep(delay)
             delay = min(delay * 2, max_delay)
 
@@ -207,8 +203,11 @@ def _handle(token, chat_id, user_id, first_name, role, text, orch, memory, priva
         if not arg:
             return _send(token, chat_id, "Nutzung: /ask <text>")
         _typing(token, chat_id)
-        res = orch.run(arg, plan=False)
-        _send(token, chat_id, res.answer)
+        try:
+            res = orch.run(arg, plan=False)
+            _send(token, chat_id, res.answer)
+        except Exception as exc:
+            _send(token, chat_id, f"❌ Fehler: {exc}")
 
     elif cmd in ("code", "plan", "research", "debug"):
         if not arg:
@@ -240,9 +239,12 @@ def _handle(token, chat_id, user_id, first_name, role, text, orch, memory, priva
             return _send(token, chat_id, "Nutzung: /run <task>")
         _typing(token, chat_id)
         _send(token, chat_id, "⏳ Plane Aufgabe …")
-        res = orch.run(arg, plan=True)
-        out = (f"📋 *Plan:*\n{res.plan}\n\n" if res.plan else "") + res.answer
-        _send(token, chat_id, out, parse_mode="Markdown")
+        try:
+            res = orch.run(arg, plan=True)
+            out = (f"📋 *Plan:*\n{res.plan}\n\n" if res.plan else "") + res.answer
+            _send(token, chat_id, out, parse_mode="Markdown")
+        except Exception as exc:
+            _send(token, chat_id, f"❌ Fehler: {exc}")
 
     elif cmd == "search":
         if not arg:
@@ -439,7 +441,13 @@ def _handle(token, chat_id, user_id, first_name, role, text, orch, memory, priva
         rows = tail(15)
         if not rows:
             return _send(token, chat_id, "Audit-Log leer.")
-        lines = [f"[{r.get('ts','?')[:16]}] {r.get('event','?')}: {r.get('tool','')}" for r in rows]
+        import datetime as _dt
+        def _fmt_ts(ts):
+            try:
+                return _dt.datetime.fromtimestamp(float(ts)).strftime("%m-%d %H:%M")
+            except Exception:
+                return str(ts)[:11]
+        lines = [f"[{_fmt_ts(r.get('ts', 0))}] {r.get('event','?')}: {r.get('tool','')}" for r in rows]
         _send(token, chat_id, "📋 *Audit-Log*\n\n" + "\n".join(lines), parse_mode="Markdown")
 
     elif cmd == "users":

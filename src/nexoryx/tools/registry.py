@@ -35,6 +35,9 @@ _TOOLS: dict[str, Tool] = {
 }
 
 
+_REGISTRY = _TOOLS  # Alias für Rückwärtskompatibilität
+
+
 def register(tool: Tool) -> None:
     """Tool registrieren (für Plugins)."""
     _TOOLS[tool.name] = tool
