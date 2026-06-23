@@ -28,11 +28,13 @@ runtime = [
 local = ["llama-cpp-python>=0.2"]
 cloud = ["anthropic>=0.40", "openai>=1.40", "google-genai>=0.3"]
 telegram = ["python-telegram-bot>=21"]
+gui = ["pywebview>=5.0"]
 dev = ["pytest>=8"]
 
 [project.scripts]
 nexoryx = "nexoryx.cli:main"
 nex = "nexoryx.cli:main"
+nexoryx-gui = "nexoryx.interfaces.gui:run"
 
 [tool.setuptools.packages.find]
 where = ["src"]

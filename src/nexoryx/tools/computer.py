@@ -333,7 +333,9 @@ def _screenshot_xlib() -> ToolResult:
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         data = buf.getvalue()
-        tmp = Path(tempfile.mktemp(suffix=".png", prefix="nex_screenshot_"))
+        fd, tmp_path = tempfile.mkstemp(suffix=".png", prefix="nex_screenshot_")
+        os.close(fd)
+        tmp = Path(tmp_path)
         tmp.write_bytes(data)
         b64 = base64.b64encode(data).decode()
         return ToolResult(
@@ -363,7 +365,9 @@ class ScreenshotTool(Tool):
             if be in ("xtest", "pyautogui"):
                 return _screenshot_xlib()
             # xdotool/ydotool: CLI-Screenshot-Tools
-            tmp = Path(tempfile.mktemp(suffix=".png", prefix="nex_screenshot_"))
+            fd, tmp_path = tempfile.mkstemp(suffix=".png", prefix="nex_screenshot_")
+            os.close(fd)
+            tmp = Path(tmp_path)
             for cmd in (
                 ["scrot", str(tmp)],
                 ["gnome-screenshot", "-f", str(tmp)],

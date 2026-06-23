@@ -21,6 +21,7 @@ from pathlib import Path
 from ..platform import choose_profile, detect
 from ..platform import config as cfg_mod
 from . import dataset
+from .eval import _first
 from .house import HOUSE_BASE, HOUSE_HF
 
 MIN_EXAMPLES = 20   # Ollama-Weg braucht weniger als LoRA
@@ -62,13 +63,6 @@ def train_report() -> dict:
 
 # ── Ollama-Modelfile-Weg ──────────────────────────────────────────────────────
 
-def _first(ex: dict, role: str) -> str:
-    for m in ex.get("messages", []):
-        if m.get("role") == role:
-            return m.get("content", "")
-    return ""
-
-
 def _quality_ok(ex: dict) -> bool:
     """Filtert leere, zu kurze oder offensichtlich fehlerhafte Beispiele aus."""
     user = _first(ex, "user").strip()
@@ -109,7 +103,6 @@ def _select_examples(max_n: int = 30) -> list[dict]:
     begrenzt synthetische Beispiele auf max. 20 %.
     """
     from . import eval as eval_gate
-    holdout = eval_gate.holdout_keys()  # nie auf Trainingsdaten evaluieren
 
     seen: set[tuple[str, str]] = set()
     teacher: list[dict] = []
@@ -118,9 +111,11 @@ def _select_examples(max_n: int = 30) -> list[dict]:
     for ex in dataset.iter_examples():
         if not _quality_ok(ex):
             continue
+        if eval_gate._is_holdout(ex):
+            continue
         key = (_first(ex, "user").strip().lower(),
                _first(ex, "assistant").strip().lower())
-        if key in seen or key in holdout:
+        if key in seen:
             continue
         seen.add(key)
         if ex.get("provider") == "synthetic":
@@ -297,7 +292,7 @@ def train(repo_root: Path | None = None) -> dict:
                 from . import eval as eval_gate
                 verdict = eval_gate.gate(candidate, incumbent)
             except Exception as exc:  # Eval-Infra darf Training nie blockieren
-                verdict = {"promote": True, "reason": f"Eval-Fehler ({exc}) — Promotion",
+                verdict = {"promote": False, "reason": f"Eval-Fehler ({exc}) — Rollback",
                            "candidate_score": None, "incumbent_score": None}
             report["eval"] = verdict
 

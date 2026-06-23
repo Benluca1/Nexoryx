@@ -74,12 +74,13 @@ def save(cfg: Config) -> None:
 
 
 def load_secrets() -> dict[str, str]:
-    """Secrets aus ~/.nexoryx/api_keys lesen (KEY=VALUE-Zeilen)."""
+    """Secrets aus ~/.nexoryx/api_keys lesen; Fallback auf Legacy ~/.nexoryx/secrets."""
+    path = SECRETS_PATH if SECRETS_PATH.exists() else _SECRETS_PATH_LEGACY
     out: dict[str, str] = {}
-    if not SECRETS_PATH.exists():
+    if not path.exists():
         return out
     try:
-        for line in SECRETS_PATH.read_text(encoding="utf-8").splitlines():
+        for line in path.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if not line or line.startswith("#") or "=" not in line:
                 continue

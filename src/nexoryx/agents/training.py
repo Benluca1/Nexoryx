@@ -16,6 +16,7 @@ from typing import Callable
 from ..orchestrator.bus import Bus
 from ..router import ChatRequest, Router
 from ..training import dataset
+from ..training.eval import _first
 from ..training.train import MIN_EXAMPLES, train
 
 _LOCK = threading.Lock()
@@ -82,6 +83,8 @@ class TrainingAgent:
         elif action == "failed":
             print(f"[TrainingAgent] ✗ Fehler: {result.get('error', '?')}")
             self.bus.publish("training.failed", error=result.get("error", "?"))
+            if on_success:
+                on_success(stats["total"], result)
 
         return result
 
@@ -130,8 +133,8 @@ class TrainingAgent:
             return 0
 
         context = "\n".join(
-            f"Nutzer: {_first_msg(ex, 'user')[:200]}\n"
-            f"Nexoryx: {_first_msg(ex, 'assistant')[:300]}"
+            f"Nutzer: {_first(ex, 'user')[:200]}\n"
+            f"Nexoryx: {_first(ex, 'assistant')[:300]}"
             for ex in templates
         )
         prompt = (
@@ -163,13 +166,6 @@ class TrainingAgent:
 
 
 # ── Hilfsfunktionen ──────────────────────────────────────────────────────────
-
-def _first_msg(ex: dict, role: str) -> str:
-    for m in ex.get("messages", []):
-        if m.get("role") == role:
-            return m.get("content", "")
-    return ""
-
 
 def _record_synthetic(text: str) -> int:
     """Parst FRAGE/ANTWORT-Paare und speichert sie im Datensatz."""

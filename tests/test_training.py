@@ -74,8 +74,7 @@ def test_select_examples_prefers_recent_and_dedupes():
         assert sel_keys.isdisjoint(holdout)
         # Flywheel-Kern: neueste (Nicht-Holdout-)Beispiele sind drin, älteste nicht
         def is_holdout(idx):
-            return ("frage nummer %03d" % idx, "ausreichend lange antwort nummer %03d" % idx) and (
-                ev._stable_hash("frage nummer %03d" % idx) % ev.HOLDOUT_DIVISOR == 0)
+            return ev._stable_hash("frage nummer %03d" % idx) % ev.HOLDOUT_DIVISOR == 0
         newest_non_holdout = next(i for i in range(59, -1, -1) if not is_holdout(i))
         oldest_non_holdout = next(i for i in range(0, 60) if not is_holdout(i))
         assert "frage nummer %03d" % newest_non_holdout in users
