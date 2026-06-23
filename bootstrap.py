@@ -429,13 +429,69 @@ def _install_gui_deps() -> None:
                     pass
             _ok("WebKit2GTK-Installation versucht (ggf. manuell: sudo apt install gir1.2-webkit2-4.1)")
 
+    pkgs_needed = []
     if not _can_import("webview"):
-        if _pip("pywebview>=5.0"):
-            _ok("pywebview installiert")
+        pkgs_needed.append("pywebview>=5.0")
+    if not _can_import("PyQt6"):
+        pkgs_needed.append("PyQt6>=6.4")
+    if not _can_import("qtpy"):
+        pkgs_needed.append("qtpy>=2.4")
+    if pkgs_needed:
+        if _pip(*pkgs_needed):
+            _ok(f"pywebview + Qt installiert")
         else:
-            _warn("pywebview konnte nicht installiert werden — GUI startet mit: pip install pywebview")
+            _warn("GUI-Pakete konnten nicht installiert werden — manuell: pip install pywebview PyQt6 qtpy")
     else:
-        _ok("pywebview vorhanden")
+        _ok("pywebview + Qt vorhanden")
+
+
+def _trust_desktop_file(path: Path) -> None:
+    """GNOME: .desktop-Datei als vertrauenswürdig markieren (kein Dialog beim Doppelklick).
+
+    Probiert drei Wege in dieser Reihenfolge:
+      1. gio set  (braucht laufende GNOME-Session)
+      2. Direktes Schreiben der GVfs-Metadaten-Datei (funktioniert auch ohne Session)
+      3. xattr user.trusted (KDE/XFCE)
+    """
+    # Weg 1: gio (funktioniert wenn GNOME-Session läuft)
+    try:
+        r = subprocess.run(
+            ["gio", "set", str(path), "metadata::trusted", "true"],
+            capture_output=True, timeout=5, check=False,
+        )
+        if r.returncode == 0:
+            return
+    except Exception:
+        pass
+
+    # Weg 2: GVfs-Metadatendatei direkt schreiben (kein laufender Desktop nötig)
+    # Dateiname = SHA-1 des URI + .trashinfo-ähnliches Format
+    try:
+        import hashlib, struct as _struct
+        uri = path.as_uri()
+        # GVfs speichert Metadaten in ~/.local/share/gvfs-metadata/
+        # Format: Binär, aber für "trusted" reicht die XML-Variante in homedir/home.xml
+        gvfs_dir = Path.home() / ".local" / "share" / "gvfs-metadata"
+        gvfs_dir.mkdir(parents=True, exist_ok=True)
+        # Einfachster Ansatz: trusted-Flag als extended attribute (xattr)
+        import ctypes, ctypes.util
+        libc_name = ctypes.util.find_library("c")
+        if libc_name:
+            libc = ctypes.CDLL(libc_name, use_errno=True)
+            key = b"user.metadata::trusted"
+            val = b"true"
+            libc.setxattr(str(path).encode(), key, val, len(val), 0)
+    except Exception:
+        pass
+
+    # Weg 3: user.trusted xattr (XFCE, KDE)
+    try:
+        subprocess.run(
+            ["xattr", "-w", "user.trusted", "true", str(path)],
+            capture_output=True, timeout=5, check=False,
+        )
+    except Exception:
+        pass
 
 
 def _create_desktop_entry() -> None:
@@ -476,15 +532,18 @@ def _create_desktop_entry() -> None:
     desktop_file.chmod(0o644)
     _ok(f"App-Eintrag: {desktop_file}")
 
+    # Desktop-Verknüpfung: Ordner anlegen falls nicht vorhanden, dann Datei platzieren
     desktop_dir = Path.home() / "Desktop"
-    if desktop_dir.is_dir():
-        link = desktop_dir / "Nexoryx.desktop"
-        shutil.copy2(desktop_file, link)
-        try:
-            link.chmod(0o755)
-        except OSError:
-            pass
-        _ok("Verknüpfung auf dem Desktop erstellt")
+    desktop_dir.mkdir(parents=True, exist_ok=True)
+    link = desktop_dir / "Nexoryx.desktop"
+    shutil.copy2(desktop_file, link)
+    link.chmod(0o755)  # ausführbar → Doppelklick funktioniert
+
+    # GNOME 3.40+: Datei als "vertrauenswürdig" markieren damit der Doppelklick
+    # ohne "Unbekannte Anwendung"-Dialog sofort startet.
+    _trust_desktop_file(link)
+
+    _ok(f"Desktop-Verknüpfung: {link}  (doppelklicken zum Starten)")
 
 
 # ── Hauptprogramm ──────────────────────────────────────────────────────────────
