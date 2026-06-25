@@ -72,15 +72,7 @@ Kompetitiver Feature-Superset (was ein moderner Agenten-Assistent können muss):
 - **Plugins:** `~/.nexoryx/plugins/*.py` registrieren eigene Tools automatisch
 - **Daemon-API** als gemeinsamer Kern für CLI/Telegram/Web
 
-> Hinweis: „OpenClaw"/„Hermes" sind hier nicht 1:1 nachgebaut — ihre exakten
-> Feature-Listen sind nicht verlässlich dokumentiert. Implementiert ist der
-> übliche Funktions-Superset solcher Assistenten plus Nexoryx-eigene Punkte
-> (HW-adaptives Profil, Tiny-Control-Brain-Routing, Security-Agent-Veto,
-> Graceful-Degradation, ein Logik-Kern für drei Frontends).
 
-Offen (größere eigene Vorhaben): eigenes Modell-Training (Tiny/Mini/Large),
-Vektor-Memory (sqlite-vec), Browser-/Docker-Tools, Telegram-Inline-Approve.
 
-## Lizenz
 
-MIT. Öffentliches Repo — bitte keine Secrets committen (siehe `.gitignore`).
+
