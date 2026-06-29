@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
-# Nexoryx — Öffentlicher Installer (User-Modus, KEIN Admin-Token).
-#
-# Admin-Funktionen gibt es nur über den LAN-Server (192.168.13.100:3007/install.sh).
-# Dieses Script enthält bewusst keinen Admin-Token.
+# Nexoryx — Öffentlicher Installer 
 #
 # Nutzung:  curl -fsSL https://raw.githubusercontent.com/Benluca1/Nexoryx/main/install.sh | bash
 
