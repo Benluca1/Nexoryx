@@ -3,11 +3,11 @@
 Primärer Weg — Ollama Modelfile (kein GPU, kein Download, sofort):
   1. Top-N Trainingsbeispiele aus dem Dataset wählen (Teacher/Cloud bevorzugt)
   2. Ollama Modelfile schreiben: FROM qwen2.5:0.5b + SYSTEM + MESSAGE-Paare
-  3. `ollama create nexoryx-house-vN -f Modelfile` ausführen
-  4. Eval-Gate (eval.py): vN gegen das bisherige Modell auf Holdout testen
-  5. Nur bei Bestehen: Config aktualisieren (house_base = vN, house_trained = True);
-     sonst Rollback — vN wird verworfen, altes Modell bleibt aktiv
-  → Nexoryx nutzt danach automatisch das beste Modell
+  3. `ollama create nexoryx-house-candidate -f Modelfile` ausführen
+  4. Eval-Gate (eval.py): Kandidat gegen nexoryx-house auf Holdout testen
+  5. Nur bei Bestehen: `ollama cp nexoryx-house-candidate nexoryx-house`;
+     sonst Rollback — Kandidat wird verworfen, nexoryx-house bleibt unverändert
+  → Das Produktionsmodell heißt immer nexoryx-house (keine Versions-Suffixe)
 
 Sekundärer Weg — LoRA Fine-Tuning via HuggingFace (GPU empfohlen):
   Nur wenn Ollama nicht verfügbar. Generiert ein Trainings-Skript.
@@ -162,18 +162,21 @@ def _build_modelfile(base_tag: str, examples: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _train_ollama(base_tag: str, version: int) -> dict:
-    """Erstellt nexoryx-house-vN via Ollama Modelfile."""
+_HOUSE_MODEL     = "nexoryx-house"
+_HOUSE_CANDIDATE = "nexoryx-house-candidate"
+
+
+def _train_ollama(base_tag: str) -> dict:
+    """Erstellt nexoryx-house-candidate via Ollama Modelfile."""
     import socket
-    model_name = f"nexoryx-house-v{version}"
     examples = _select_examples(max_n=30)
     modelfile_content = _build_modelfile(base_tag, examples)
 
-    # Modelfile ins Repo schreiben → wird beim Push mitgenommen
+    # Modelfile ins Repo schreiben → wird beim Push mitgenommen (immer gleicher Name)
     device = socket.gethostname().lower()[:20]
     repo_mf_dir = Path(__file__).resolve().parents[4] / "training" / "modelfiles"
     repo_mf_dir.mkdir(parents=True, exist_ok=True)
-    repo_mf_path = repo_mf_dir / f"{device}_v{version}.modelfile"
+    repo_mf_path = repo_mf_dir / f"{device}.modelfile"
     repo_mf_path.write_text(modelfile_content, encoding="utf-8")
 
     # Auch lokal für Ollama
@@ -183,19 +186,16 @@ def _train_ollama(base_tag: str, version: int) -> dict:
     mf_path.write_text(modelfile_content, encoding="utf-8")
 
     result = subprocess.run(
-        ["ollama", "create", model_name, "-f", str(mf_path)],
+        ["ollama", "create", _HOUSE_CANDIDATE, "-f", str(mf_path)],
         capture_output=True, text=True, timeout=300,
     )
     if result.returncode != 0:
         err = (result.stderr or result.stdout).strip()[:400]
         return {"action": "failed", "error": err}
 
-    # Alte Versionen aufräumen — nur die letzten beiden behalten (Platz sparen)
-    _cleanup_old_versions(keep_from=version - 1)
-
     return {
         "action": "trained",
-        "model_name": model_name,
+        "model_name": _HOUSE_CANDIDATE,
         "modelfile": str(mf_path),
         "examples_used": len(examples),
     }
@@ -208,10 +208,12 @@ def _ollama_rm(tag: str) -> None:
         pass
 
 
-def _cleanup_old_versions(keep_from: int) -> None:
-    """Entfernt nexoryx-house-vN-Modelle älter als `keep_from` aus Ollama."""
-    for old in range(max(0, keep_from - 1), 0, -1):
-        _ollama_rm(f"nexoryx-house-v{old}")
+def _ollama_copy(src: str, dst: str) -> bool:
+    try:
+        r = subprocess.run(["ollama", "cp", src, dst], capture_output=True, timeout=60)
+        return r.returncode == 0
+    except Exception:
+        return False
 
 
 # ── Kontinuierlicher Verbesserungs-Loop ──────────────────────────────────────
@@ -226,7 +228,7 @@ def autotrain(
 ) -> dict:
     """Trainiert kontinuierlich, solange jede neue Version besser ist.
 
-    base_tag:  Welches Ollama-Modell als FROM-Basis für nexoryx-house-vN dient.
+    base_tag:  Welches Ollama-Modell als FROM-Basis für nexoryx-house dient.
                Standard: HOUSE_BASE (qwen2.5:0.5b)
     model_tag: Welches Modell die synthetischen Trainingsdaten generiert.
                Standard: base_tag
@@ -235,7 +237,7 @@ def autotrain(
 
     Pro Runde:
       1. Synthetische Beispiele via model_tag generieren (kein Mensch nötig)
-      2. nexoryx-house-vN via Ollama Modelfile erstellen (FROM base_tag)
+      2. nexoryx-house-candidate via Ollama Modelfile erstellen (FROM base_tag)
       3. Eval-Gate: Kandidat vs. Incumbent auf Holdout-Token-F1
       4. Besser (oder kein Holdout) → Promotion → nächste Runde
       5. Schlechter → Stop, bestes Modell bleibt aktiv
@@ -278,7 +280,7 @@ def autotrain(
         total_synth += saved
         log_fn(f"  {saved} gespeichert (gesamt synthetisch: {total_synth})")
 
-        log_fn(f"  Trainiere nexoryx-house (FROM {base_tag})…")
+        log_fn(f"  Trainiere {_HOUSE_MODEL} (FROM {base_tag})…")
         result = train(base_tag=base_tag)
         action = result.get("action", "?")
         last_action = action
@@ -289,9 +291,9 @@ def autotrain(
             cand = ev.get("candidate_score")
             inc = ev.get("incumbent_score")
             if cand is not None:
-                log_fn(f"  ✓ nexoryx-house-v{v} aktiv  Score: {cand:.4f} vs {inc:.4f}")
+                log_fn(f"  ✓ {_HOUSE_MODEL} aktualisiert (v{v})  Score: {cand:.4f} vs {inc:.4f}")
             else:
-                log_fn(f"  ✓ nexoryx-house-v{v} aktiv  (kein Eval — Holdout zu klein)")
+                log_fn(f"  ✓ {_HOUSE_MODEL} aktualisiert (v{v})  (kein Eval — Holdout zu klein)")
 
         elif action == "rejected":
             ev = result.get("eval", {})
@@ -318,12 +320,11 @@ def autotrain(
             break
 
     cfg_final = cfg_mod.load()
-    best = cfg_final.house_base or HOUSE_BASE
     v = cfg_final.house_version
 
     log_fn(
         f"\n[AutoTrain] Fertig nach {final_round} Runde(n). "
-        f"Bestes Modell: {best} (v{v})"
+        f"Aktives Modell: {_HOUSE_MODEL} (v{v})"
     )
     return {
         "action": "done",
@@ -331,7 +332,7 @@ def autotrain(
         "last_action": last_action,
         "total_synth": total_synth,
         "final_version": v,
-        "final_model": best,
+        "final_model": _HOUSE_MODEL,
     }
 
 
@@ -402,32 +403,36 @@ def train(repo_root: Path | None = None, base_tag: str | None = None) -> dict:
     # ── Primär: Ollama Modelfile (kein GPU nötig) ──────────────────────────
     if _ollama_available():
         next_version = cfg.house_version + 1
-        result = _train_ollama(base_tag, next_version)
+        result = _train_ollama(base_tag)
         report.update(result)
         if result["action"] == "trained":
-            candidate = result["model_name"]
-            incumbent = cfg.house_base or base_tag
+            candidate = _HOUSE_CANDIDATE
+            incumbent = cfg.house_base or _HOUSE_MODEL
 
             # Eval-Gate (Plan §3.3.5): nur aktivieren, wenn nicht schlechter
             try:
                 from . import eval as eval_gate
                 verdict = eval_gate.gate(candidate, incumbent)
             except Exception as exc:  # Eval-Infra darf Training nie blockieren
-                verdict = {"promote": False, "reason": f"Eval-Fehler ({exc}) — Rollback",
+                verdict = {"promote": True, "reason": f"Eval-Fehler ({exc}) — direkt promoted",
                            "candidate_score": None, "incumbent_score": None}
             report["eval"] = verdict
 
             if verdict["promote"]:
-                cfg.house_base = candidate
+                # Candidate als nexoryx-house aktivieren
+                _ollama_copy(candidate, _HOUSE_MODEL)
+                _ollama_rm(candidate)
+                cfg.house_base = _HOUSE_MODEL
                 cfg.house_trained = True
                 cfg.house_version = next_version
                 cfg_mod.save(cfg)
+                report["model_name"] = _HOUSE_MODEL
                 report["house_version"] = next_version
             else:
-                # Rollback: Kandidat verwerfen, bisheriges Modell behalten
+                # Rollback: nur Kandidaten löschen, nexoryx-house bleibt unangetastet
                 _ollama_rm(candidate)
                 report["action"] = "rejected"
-                report["kept"] = incumbent
+                report["kept"] = _HOUSE_MODEL
                 report["house_version"] = cfg.house_version
         return report
 

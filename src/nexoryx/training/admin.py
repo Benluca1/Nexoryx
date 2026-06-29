@@ -14,7 +14,7 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _MODELFILE = _REPO_ROOT / "training" / "modelfiles" / "nex_admin.modelfile"
-_ADMIN_BASE = "qwen2.5:0.5b"
+_ADMIN_BASE = "qwen2.5-coder:1.5b"
 MODEL_TAG = "nex_admin"
 
 

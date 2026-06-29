@@ -420,7 +420,7 @@ def run() -> int:
 
             elif cmd == "/update":
                 console.print()
-                _do_update(console)
+                _do_update(console, is_admin=session_admin[0])
 
             elif cmd == "/settings":
                 console.print()
@@ -687,7 +687,7 @@ def _cmd_train(console: "Console") -> None:
 
     action = result.get("action", "?")
     if action == "trained":
-        console.print(f"  [bold {_GREEN}]✓[/bold {_GREEN}]  Training abgeschlossen — Version {result.get('house_version')}")
+        console.print(f"  [bold {_GREEN}]✓[/bold {_GREEN}]  nexoryx-house aktualisiert (v{result.get('house_version')})")
     elif action == "rejected":
         ev = result.get("eval", {})
         console.print(
@@ -748,13 +748,25 @@ def _arrow_select(
     DIM  = "\033[38;2;90;60;10m"
     RST  = "\033[0m"
 
+    import re as _re_strip
+    _rich_re = _re_strip.compile(r'\[/?[^\[\]\n]+\]')
+
+    def _plain(s: str) -> str:
+        return _rich_re.sub('', s)
+
     def _lines() -> list[str]:
+        try:
+            import shutil
+            cols = max(40, shutil.get_terminal_size().columns - 10)
+        except OSError:
+            cols = 70
         out = []
         for i, (_, label) in enumerate(items):
+            plain = _plain(label)[:cols]
             if i == selected:
-                out.append(f"  {SEL}►  {label}{RST}")
+                out.append(f"  {SEL}►  {plain}{RST}")
             else:
-                out.append(f"  {DIM}   {label}{RST}")
+                out.append(f"  {DIM}   {plain}{RST}")
         out.append("")
         out.append(f"  \033[2m↑ ↓  navigieren   Enter  bestätigen   q  abbrechen\033[0m")
         return out  # n + 2 Einträge
@@ -762,7 +774,7 @@ def _arrow_select(
     # Header mit Rich drucken (außerhalb raw-mode)
     console.print()
     console.print(Panel(
-        Text(f"Modell für Synthese wählen", style=f"bold {_AMBER}"),
+        Text(f"Auswahl mit ↑ ↓, bestätigen mit Enter", style=f"dim {_AMBER_DIM}"),
         title=f"[bold {_AMBER_HI}]◆ {title}[/bold {_AMBER_HI}]",
         border_style=_AMBER_DIM, box=box.HEAVY_HEAD, padding=(0, 2),
     ))
@@ -926,7 +938,7 @@ def _autotrain_running() -> bool:
 def _cmd_autotrain(console: "Console", is_admin: bool) -> None:
     """Zwei-Schritt-Modellauswahl (Pfeiltasten) + Start des AutoTrain-Loops.
 
-    Schritt 1: Welches Nex-Modell wird trainiert? (Basis für nexoryx-house-vN)
+    Schritt 1: Welches Nex-Modell wird trainiert? (Basis für nexoryx-house)
     Schritt 2: Welches Modell generiert die Trainingsdaten? (Synthesizer)
     """
     import subprocess
@@ -1081,13 +1093,12 @@ def _cmd_autotrain(console: "Console", is_admin: bool) -> None:
     )
 
     # ── Bestätigungs-Panel ────────────────────────────────────────────────────
-    next_v = cfg.house_version + 1
     console.print()
     tbl = Table(box=box.SIMPLE, show_header=False, padding=(0, 2))
     tbl.add_column(style=_AMBER_DIM, width=26)
     tbl.add_column(style="white")
     tbl.add_row("Nex-Modell (Basis)", chosen_base)
-    tbl.add_row("  → wird zu", f"nexoryx-house-v{next_v}")
+    tbl.add_row("  → aktualisiert", "nexoryx-house")
     tbl.add_row("Synthese-Modell", chosen_synth)
     tbl.add_row("Trainingsthemen", ", ".join(topics) if topics else "(Standard-Pool)")
     tbl.add_row("Max. Runden", "50")
@@ -1858,39 +1869,187 @@ def _on_exit(console: "Console", history: list[str], stats: dict,
 
 # ── Update-Helfer ─────────────────────────────────────────────────────────────
 
-def _do_update(console: "Console") -> None:
-    import os, subprocess, time
+_NEX_ADMIN_SERVER = "http://192.168.13.100:3008"
+
+
+def _do_update(console: "Console", is_admin: bool = False) -> None:
+    import os, subprocess, time, urllib.request, urllib.error
     from pathlib import Path
+
     repo = Path(__file__).resolve().parents[3]
+    needs_restart = False
+
+    # ── 1. Reguläres git pull ─────────────────────────────────────────────────
     with console.status(
         f"[bold {_AMBER}]◆[/bold {_AMBER}]  [{_AMBER_DIM}]Lade Update …[/{_AMBER_DIM}]",
         spinner="dots2", spinner_style=_AMBER_HI,
     ):
         pull = subprocess.run(["git", "pull", "--ff-only"],
                               cwd=repo, capture_output=True, text=True)
+
     if pull.returncode != 0:
         console.print(Panel(
             Text(pull.stderr.strip() or "Unbekannter Fehler", style="red"),
             title=f"[bold {_RED}]✗ git pull fehlgeschlagen[/bold {_RED}]",
             border_style="red", box=box.ROUNDED, padding=(0, 2)))
-        return
-    msg = pull.stdout.strip()
-    if "Already up to date" in msg or "Bereits aktuell" in msg:
-        console.print(f"\n  [{_AMBER_DIM}]◆  Bereits aktuell.[/{_AMBER_DIM}]\n")
-        return
-    console.print(f"\n  [bold {_GREEN}]✓[/bold {_GREEN}]  {msg}")
+    else:
+        git_msg = pull.stdout.strip()
+        already_current = "Already up to date" in git_msg or "Bereits aktuell" in git_msg
+        if already_current:
+            console.print(f"\n  [{_AMBER_DIM}]◆  Bereits aktuell.[/{_AMBER_DIM}]")
+        else:
+            console.print(f"\n  [bold {_GREEN}]✓[/bold {_GREEN}]  {git_msg}")
+            with console.status(
+                f"[bold {_AMBER}]◆[/bold {_AMBER}]  [{_AMBER_DIM}]Installiere …[/{_AMBER_DIM}]",
+                spinner="dots2", spinner_style=_AMBER_HI,
+            ):
+                pip = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "-e", ".", "-q"],
+                    cwd=repo, capture_output=True, text=True,
+                )
+            if pip.returncode != 0:
+                console.print(
+                    f"  [bold {_RED}]pip fehlgeschlagen:[/bold {_RED}]\n{pip.stderr.strip()}"
+                )
+            else:
+                console.print(f"  [bold {_GREEN}]✓[/bold {_GREEN}]  Update installiert.")
+                needs_restart = True
+
+    # ── 2. nex_admin vom Server laden (nur Admin + gleicher LAN) ─────────────
+    if is_admin:
+        _do_update_nex_admin(console)
+
+    # ── 3. Neustart wenn Code-Update ─────────────────────────────────────────
+    if needs_restart:
+        console.print(f"\n  [{_AMBER_DIM}]Starte neu …[/{_AMBER_DIM}]\n")
+        time.sleep(0.8)
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+
+
+def _do_update_nex_admin(console: "Console") -> None:
+    """Lädt nex_admin-Modelfile vom privaten Server und installiert es via Ollama."""
+    import subprocess, urllib.request, urllib.error
+    from pathlib import Path
+
+    server = _NEX_ADMIN_SERVER
+    secret_path = Path.home() / ".nexoryx" / "server-secret"
+
+    # Server erreichbar?
     with console.status(
-        f"[bold {_AMBER}]◆[/bold {_AMBER}]  [{_AMBER_DIM}]Installiere …[/{_AMBER_DIM}]",
+        f"[bold {_AMBER}]◆[/bold {_AMBER}]  [{_AMBER_DIM}]Prüfe Admin-Server …[/{_AMBER_DIM}]",
         spinner="dots2", spinner_style=_AMBER_HI,
     ):
-        pip = subprocess.run([sys.executable, "-m", "pip", "install", "-e", ".", "-q"],
-                             cwd=repo, capture_output=True, text=True)
-    if pip.returncode != 0:
-        console.print(f"  [bold {_RED}]pip fehlgeschlagen:[/bold {_RED}]\n{pip.stderr.strip()}")
+        try:
+            urllib.request.urlopen(f"{server}/health", timeout=3)
+            server_ok = True
+        except Exception:
+            server_ok = False
+
+    if not server_ok:
+        console.print(
+            f"  [dim {_AMBER_DIM}]◆  Admin-Server ({server}) nicht erreichbar — "
+            f"nex_admin übersprungen.[/dim {_AMBER_DIM}]"
+        )
         return
-    console.print(f"  [bold {_GREEN}]✓[/bold {_GREEN}]  Update installiert — starte neu …\n")
-    time.sleep(0.8)
-    os.execv(sys.executable, [sys.executable] + sys.argv)
+
+    # Secret lesen
+    try:
+        secret = secret_path.read_text(encoding="utf-8").strip()
+    except OSError:
+        console.print(
+            f"  [bold {_YELLOW}]⚠  Server-Secret nicht gefunden:[/bold {_YELLOW}]  {secret_path}\n"
+            f"  [dim]Stelle sicher dass ~/.nexoryx/server-secret existiert (chmod 600).[/dim]"
+        )
+        return
+
+    if not secret:
+        console.print(f"  [bold {_YELLOW}]⚠  server-secret ist leer.[/bold {_YELLOW}]")
+        return
+
+    # Modelfile herunterladen
+    console.print(f"\n  [{_AMBER}]◆  lade nex_admin vom Server …[/{_AMBER}]")
+    with console.status(
+        f"[bold {_AMBER}]◆[/bold {_AMBER}]  [{_AMBER_DIM}]Download nex_admin.modelfile …[/{_AMBER_DIM}]",
+        spinner="dots2", spinner_style=_AMBER_HI,
+    ):
+        try:
+            req = urllib.request.Request(
+                f"{server}/admin/model/nex_admin",
+                headers={"Authorization": f"Bearer {secret}"},
+            )
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                modelfile_content = resp.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            console.print(Panel(
+                Text(f"Server antwortet mit {exc.code}: {exc.reason}", style=f"bold {_RED}"),
+                title=f"[bold {_RED}]✗ Download fehlgeschlagen[/bold {_RED}]",
+                border_style=_RED, box=box.ROUNDED, padding=(0, 2)))
+            return
+        except Exception as exc:
+            console.print(Panel(
+                Text(str(exc), style=f"bold {_RED}"),
+                title=f"[bold {_RED}]✗ Verbindungsfehler[/bold {_RED}]",
+                border_style=_RED, box=box.ROUNDED, padding=(0, 2)))
+            return
+
+    # Modelfile lokal speichern (~/.nexoryx/admin_models/, nicht im Repo)
+    dest_dir = Path.home() / ".nexoryx" / "admin_models"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / "nex_admin.modelfile"
+    try:
+        dest.write_text(modelfile_content, encoding="utf-8")
+        dest.chmod(0o600)
+    except Exception as exc:
+        console.print(f"  [bold {_RED}]✗  Speichern fehlgeschlagen:[/bold {_RED}]  {exc}")
+        return
+
+    console.print(f"  [bold {_GREEN}]✓[/bold {_GREEN}]  Modelfile gespeichert: {dest}")
+
+    # Basis-Modell prüfen / pullen
+    base = "qwen2.5-coder:1.5b"
+    with console.status(
+        f"[bold {_AMBER}]◆[/bold {_AMBER}]  [{_AMBER_DIM}]Prüfe Basis-Modell {base} …[/{_AMBER_DIM}]",
+        spinner="dots2", spinner_style=_AMBER_HI,
+    ):
+        check = subprocess.run(["ollama", "list"], capture_output=True, text=True, timeout=5)
+        has_base = check.returncode == 0 and base in check.stdout
+
+    if not has_base:
+        console.print(f"  [{_AMBER}]◆  Lade {base} (einmalig, kann etwas dauern) …[/{_AMBER}]")
+        pull_r = subprocess.run(["ollama", "pull", base], timeout=600)
+        if pull_r.returncode != 0:
+            console.print(
+                f"  [bold {_YELLOW}]⚠  Basis-Modell konnte nicht geladen werden.[/bold {_YELLOW}]\n"
+                f"  [dim]Manuell: ollama pull {base}[/dim]"
+            )
+
+    # Modell erstellen
+    console.print(f"  [{_AMBER}]◆  Erstelle nex_admin …[/{_AMBER}]")
+    with console.status(
+        f"[bold {_AMBER}]◆[/bold {_AMBER}]  [{_AMBER_DIM}]ollama create nex_admin …[/{_AMBER_DIM}]",
+        spinner="dots2", spinner_style=_AMBER_HI,
+    ):
+        create_r = subprocess.run(
+            ["ollama", "create", "nex_admin", "-f", str(dest)],
+            capture_output=True, text=True, timeout=300,
+        )
+
+    if create_r.returncode != 0:
+        err = (create_r.stderr or create_r.stdout).strip()[:400]
+        console.print(Panel(
+            Text(err, style=f"bold {_RED}"),
+            title=f"[bold {_RED}]✗ ollama create fehlgeschlagen[/bold {_RED}]",
+            border_style=_RED, box=box.ROUNDED, padding=(0, 2)))
+        return
+
+    console.print(Panel(
+        Text(
+            "nex_admin erfolgreich installiert!\n"
+            "Auswählen mit: /models",
+            style=f"bold {_GREEN}",
+        ),
+        title=f"[bold {_GREEN}]✓ nex_admin installiert[/bold {_GREEN}]",
+        border_style=_GREEN, box=box.HEAVY_HEAD, padding=(0, 2)))
 
 
 # ── Settings ──────────────────────────────────────────────────────────────────

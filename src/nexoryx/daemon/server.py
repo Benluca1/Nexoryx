@@ -73,6 +73,8 @@ def _build_handler(router: Router | None = None):
                 })
             if self.path == "/training/status":
                 return self._handle_training_status()
+            if self.path == "/admin/model/nex_admin":
+                return self._handle_admin_model()
             return self._send(404, {"error": "not found"})
 
         def do_POST(self):
@@ -145,6 +147,27 @@ def _build_handler(router: Router | None = None):
             threading.Thread(target=_push, daemon=True).start()
 
             return self._send(200, {"ok": True, "device": device, "lines": n})
+
+        def _handle_admin_model(self):
+            """Liefert das nex_admin-Modelfile (nur mit gültigem server-secret)."""
+            auth = self.headers.get("Authorization", "")
+            if not server_secret or auth != f"Bearer {server_secret}":
+                return self._send(403, {"error": "unauthorized"})
+            mf_path = (
+                Path(__file__).resolve().parents[3]
+                / "training" / "modelfiles" / "nex_admin.modelfile"
+            )
+            if not mf_path.exists():
+                return self._send(404, {"error": "modelfile not found"})
+            try:
+                body = mf_path.read_bytes()
+            except Exception as exc:
+                return self._send(500, {"error": str(exc)})
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
 
         def _handle_training_status(self):
             try:
