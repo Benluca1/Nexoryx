@@ -183,7 +183,7 @@ ok "pip bereit"
 
 # ── Schritt 4: Python-Pakete ─────────────────────────────────────────────────
 step "4/7  Python-Pakete"
-pip_run "Nexoryx + Kernabhängigkeiten" -e "$REPO_DIR[runtime,cloud,telegram]" \
+pip_run "Nexoryx + Kernabhängigkeiten" -e "$REPO_DIR[runtime,cloud,telegram,gui]" \
   || pip_run "Nexoryx (Fallback ohne Extras)" "$REPO_DIR" \
   || warn "Nexoryx-Paket konnte nicht installiert werden"
 
@@ -195,6 +195,16 @@ pip_run "Telegram-Bot" "python-telegram-bot>=21" || true
 pip_run "Web-Daemon + CLI" \
   "fastapi>=0.110" "uvicorn>=0.29" "pydantic>=2.6" \
   "httpx>=0.27" "typer>=0.12" "rich>=13" || true
+
+# Desktop-GUI: WebKit2GTK als System-Paket (apt-only; kein pip-Äquivalent)
+if [[ "$PM" == "apt" ]] && [[ "$OS" != "Darwin" ]]; then
+  echo "  GUI-System-Deps (WebKit2GTK) …"
+  pkg_install "python3-gi"         >>"$LOG_FILE" 2>&1 || true
+  pkg_install "python3-gi-cairo"   >>"$LOG_FILE" 2>&1 || true
+  pkg_install "gir1.2-webkit2-4.1" >>"$LOG_FILE" 2>&1 || \
+    pkg_install "gir1.2-webkit2-4.0" >>"$LOG_FILE" 2>&1 || true
+  ok "WebKit2GTK System-Pakete installiert"
+fi
 
 pip_run "Dev-Tools" "pytest>=8" || true
 ok "Python-Pakete abgeschlossen"
@@ -304,9 +314,10 @@ echo -e "  ${BLD}${GRN}Nexoryx erfolgreich installiert!${RST}"
 echo -e "${BLD}${GRN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RST}"
 echo ""
 echo -e "  ${BLD}Loslegen:${RST}"
-echo -e "    ${CYN}nexoryx doctor${RST}    Hardware + Profil prüfen"
-echo -e "    ${CYN}nexoryx chat${RST}      Interaktiver Chat"
-echo -e "    ${CYN}nex${RST}               TUI starten"
+echo -e "    ${CYN}nex-gui${RST}           Desktop-GUI öffnen"
+echo -e "    ${CYN}nex${RST}               TUI starten (Harness)"
+echo -e "    ${CYN}nex doctor${RST}        Hardware + Profil prüfen"
+echo -e "    ${CYN}nex chat${RST}          Interaktiver Chat"
 echo ""
 echo -e "  ${DIM}Shell neu laden:  exec \$SHELL  oder  source ~/.bashrc${RST}"
 echo -e "  ${DIM}Vollständiges Log: $LOG_FILE${RST}"

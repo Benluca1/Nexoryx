@@ -3,15 +3,15 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Nexoryx</title>
+  <title>nex</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
 <!-- ── Splash ────────────────────────────────────────────────────────────── -->
 <div id="splash" class="splash">
-  <div class="splash-logo">NX</div>
-  <h1 class="splash-title">Nexoryx</h1>
+  <div class="splash-logo">nex</div>
+  <h1 class="splash-title">nex</h1>
   <p id="splash-msg" class="splash-msg">Starte Dienst&hellip;</p>
   <div class="dots"><span></span><span></span><span></span></div>
 </div>
@@ -22,24 +22,24 @@
   <!-- Schritt 1: Willkommen -->
   <div id="step-welcome" class="step active">
     <div class="step-icon">✦</div>
-    <h2>Willkommen bei Nexoryx</h2>
+    <h2>Willkommen bei nex</h2>
     <p class="step-desc">
-      Dein persönlicher KI-Assistent. Läuft lokal und in der Cloud —
-      du entscheidest, wie viel Privatsphäre du willst.
+      Deine KI-Harness. Jede Antwort verbessert das Modell —
+      nex lernt aus jedem Gespräch und wird mit der Zeit immer besser.
     </p>
     <button class="btn-primary" onclick="nextStep()">Los geht&rsquo;s &rarr;</button>
   </div>
 
-  <!-- Schritt 2: API-Keys -->
+  <!-- Step 2: API Keys -->
   <div id="step-keys" class="step hidden">
     <div class="step-icon">🔑</div>
-    <h2>API-Keys (optional)</h2>
+    <h2>API keys <span style="opacity:.5;font-weight:400">(optional)</span></h2>
     <p class="step-desc">
-      Nexoryx wählt automatisch das beste Modell. Ohne Keys läuft
-      alles lokal über Ollama — so bleibt alles auf deinem Gerät.
+      nex picks the best model automatically. Without keys it runs
+      entirely local via Ollama — nothing leaves your machine.
     </p>
     <div class="key-inputs">
-      <label>Anthropic Claude <span class="chip">Empfohlen</span></label>
+      <label>Anthropic Claude <span class="chip">Recommended</span></label>
       <input id="key-anthropic" type="password" placeholder="sk-ant-…" autocomplete="off">
       <label>OpenAI GPT-4o</label>
       <input id="key-openai" type="password" placeholder="sk-…" autocomplete="off">
@@ -47,24 +47,24 @@
       <input id="key-gemini" type="password" placeholder="AIza…" autocomplete="off">
     </div>
     <div class="step-actions">
-      <button class="btn-primary" onclick="saveKeysAndNext()">Weiter &rarr;</button>
-      <button class="btn-ghost" onclick="nextStep()">Überspringen</button>
+      <button class="btn-primary" onclick="saveKeysAndNext()">Continue &rarr;</button>
+      <button class="btn-ghost" onclick="nextStep()">Skip</button>
     </div>
   </div>
 
-  <!-- Schritt 3: Erste Nachricht -->
+  <!-- Step 3: First message -->
   <div id="step-first" class="step hidden">
     <div class="step-icon">💬</div>
-    <h2>Schreib deine erste Nachricht</h2>
+    <h2>Send your first message</h2>
     <p class="step-desc">
-      Frag mich alles — Code, Texte, Recherche, Planung, Erklärungen.
-      Ich passe mich deiner Hardware an.
+      Ask anything — code, research, planning, explanations.
+      Every reply trains the model.
     </p>
     <div class="first-input-row">
       <input id="first-msg" type="text"
-             placeholder="Hallo! Was kannst du für mich tun?"
+             placeholder="What can you do for me?"
              onkeydown="if(event.key==='Enter') sendFirstMsg()">
-      <button class="btn-primary" onclick="sendFirstMsg()">Senden ✦</button>
+      <button class="btn-primary" onclick="sendFirstMsg()">Send ✦</button>
     </div>
   </div>
 
@@ -75,7 +75,7 @@
 
   <!-- Seitenleiste -->
   <aside class="sidebar">
-    <div class="sidebar-logo">NX</div>
+    <div class="sidebar-logo">nex</div>
     <nav class="sidebar-nav">
       <button class="nav-btn active" data-view="chat" title="Chat"
               onclick="switchView('chat', this)">
@@ -98,10 +98,11 @@
   <!-- Chat-Bereich -->
   <main id="view-chat" class="chat-view">
     <header class="chat-header">
-      <span class="chat-title">Nexoryx</span>
+      <span class="chat-title">nex</span>
       <div class="status-bar">
         <span id="st-profile" class="st-chip" title="Hardware-Profil">—</span>
         <span id="st-model"   class="st-chip" title="Aktives Modell">—</span>
+        <span id="st-learn" class="st-chip learn-chip hidden" title="Interaktion wird als Trainingsdatum gespeichert">◉ lernt</span>
         <span id="st-dot" class="st-dot" title="Verbindung">●</span>
       </div>
     </header>
@@ -109,16 +110,16 @@
     <div id="messages" class="messages">
       <!-- Willkommens-Hinweis (wird beim ersten echten Nachrichten-Austausch entfernt) -->
       <div id="empty-hint" class="empty-hint">
-        <div class="empty-logo">NX</div>
-        <p>Stell mir eine Frage — ich bin bereit.</p>
+        <div class="empty-logo">nex</div>
+        <p>Stell mir eine Frage — jede Antwort trainiert das Modell.</p>
       </div>
     </div>
 
     <footer class="input-area">
       <textarea id="chat-input" rows="1"
-                placeholder="Schreib etwas… (Enter = senden, Shift+Enter = Zeilenumbruch)"
+                placeholder="Ask anything… (Enter = send, Shift+Enter = newline)"
       ></textarea>
-      <button id="send-btn" class="send-btn" title="Senden">
+      <button id="send-btn" class="send-btn" title="Send">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <line x1="22" y1="2" x2="11" y2="13"/>
           <polygon points="22 2 15 22 11 13 2 9 22 2"/>
@@ -127,41 +128,41 @@
     </footer>
   </main>
 
-  <!-- Einstellungen -->
+  <!-- Settings -->
   <main id="view-settings" class="settings-view hidden">
     <div class="settings-scroll">
-      <h2 class="settings-title">Einstellungen</h2>
+      <h2 class="settings-title">Settings</h2>
 
       <section class="settings-section">
-        <h3>API-Keys</h3>
+        <h3>API keys</h3>
         <p class="settings-hint">
-          Keys werden verschlüsselt in <code>~/.nexoryx/api_keys</code> gespeichert.
+          Keys are stored encrypted in <code>~/.nexoryx/api_keys</code>.
         </p>
-        <label>Anthropic Claude <span class="chip">Empfohlen</span></label>
-        <input id="set-anthropic" type="password" placeholder="sk-ant-… (leer lassen = unverändert)" autocomplete="off">
+        <label>Anthropic Claude <span class="chip">Recommended</span></label>
+        <input id="set-anthropic" type="password" placeholder="sk-ant-… (leave empty = keep)" autocomplete="off">
         <label>OpenAI GPT-4o</label>
-        <input id="set-openai" type="password" placeholder="sk-… (leer lassen = unverändert)" autocomplete="off">
+        <input id="set-openai" type="password" placeholder="sk-… (leave empty = keep)" autocomplete="off">
         <label>Google Gemini</label>
-        <input id="set-gemini" type="password" placeholder="AIza… (leer lassen = unverändert)" autocomplete="off">
+        <input id="set-gemini" type="password" placeholder="AIza… (leave empty = keep)" autocomplete="off">
       </section>
 
       <section class="settings-section">
-        <h3>Verhalten</h3>
-        <label>Tages-Budget für Cloud-APIs (USD, 0 = kein Limit)</label>
+        <h3>Behavior</h3>
+        <label>Daily cloud budget (USD, 0 = no limit)</label>
         <input id="set-budget" type="number" step="0.5" min="0" value="0">
-        <label>Persönlichkeits-Zusatz (System-Prompt-Erweiterung)</label>
+        <label>Personality addition (system prompt extension)</label>
         <textarea id="set-persona" rows="4"
-                  placeholder="z. B.: Antworte immer auf Deutsch. Sei prägnant und direkt."></textarea>
+                  placeholder="e.g.: Always reply concisely. Use bullet points."></textarea>
       </section>
 
       <section class="settings-section" id="section-status">
-        <h3>System-Info</h3>
-        <div id="sys-info" class="sys-info">Lädt&hellip;</div>
+        <h3>System info</h3>
+        <div id="sys-info" class="sys-info">Loading&hellip;</div>
       </section>
 
       <div class="settings-actions">
-        <button class="btn-primary" onclick="saveSettings()">Einstellungen speichern</button>
-        <p id="save-msg" class="save-msg hidden">✓ Gespeichert</p>
+        <button class="btn-primary" onclick="saveSettings()">Save settings</button>
+        <p id="save-msg" class="save-msg hidden">✓ Saved</p>
       </div>
     </div>
   </main>

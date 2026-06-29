@@ -33,8 +33,9 @@ dev = ["pytest>=8"]
 
 [project.scripts]
 nexoryx = "nexoryx.cli:main"
-nex = "nexoryx.cli:main"
+nex     = "nexoryx.cli:main"
 nexoryx-gui = "nexoryx.interfaces.gui:run"
+nex-gui     = "nexoryx.interfaces.gui:run"
 
 [tool.setuptools.packages.find]
 where = ["src"]

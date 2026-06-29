@@ -1,4 +1,4 @@
-"""Nexoryx CLI (`nexoryx`) — Phase-0-Stand.
+"""Nexoryx CLI — primärer Einstieg via `nex` (Alias: `nexoryx`).
 
 Zero-dependency (argparse), damit es sofort ohne Installation läuft:
     python3 -m nexoryx doctor
@@ -12,6 +12,10 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
+
+# Prog-Name: "nex" wenn als `nex` aufgerufen, sonst "nexoryx"
+_PROG = Path(sys.argv[0]).name if sys.argv else "nex"
 
 from . import __version__
 from .platform import detect, choose_profile, model_gates
@@ -99,7 +103,7 @@ def _check(label: str, ok: bool) -> None:
 
 
 def cmd_version(_args: argparse.Namespace) -> int:
-    print(f"nexoryx {__version__}")
+    print(f"nex {__version__}  (nexoryx)")
     return 0
 
 
@@ -710,7 +714,7 @@ def cmd_admin(args: argparse.Namespace) -> int:
         if admin_id:
             cfg.telegram_admin_id = admin_id
             cfg_mod.save(cfg)
-        print("Telegram konfiguriert. Start:  nexoryx telegram")
+        print("Telegram konfiguriert. Start:  nex telegram")
         return 0
 
     if args.admin_action == "user":
@@ -763,7 +767,7 @@ def cmd_admin(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="nexoryx", description="Nexoryx — Multi-Agenten-KI-Framework")
+    p = argparse.ArgumentParser(prog=_PROG, description="nex — KI-Harness · Modelle lernen aus jeder Interaktion")
     sub = p.add_subparsers(dest="command", required=False)
 
     sub.add_parser("doctor", help="Hardware + Profil + Checks anzeigen").set_defaults(func=cmd_doctor)

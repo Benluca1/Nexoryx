@@ -5,6 +5,7 @@ Jede Nachricht geht durch denselben Kanal — das Modell entscheidet selbst ob
 es Tools braucht oder direkt antwortet.
 """
 from __future__ import annotations
+import random
 import sys
 
 try:
@@ -46,7 +47,15 @@ _YELLOW    = "#F5C242"
 _CYAN      = "#4DB6C8"
 _PURPLE    = "#8B7EC8"
 
-# ── Maskottchen ───────────────────────────────────────────────────────────────
+_MOTTOS = [
+    "trained in the dark. ready in the light.",
+    "no cloud required. no trace left behind.",
+    "local. private. learning.",
+    "open weights. your data. your model.",
+    "why pay for intelligence you can grow?",
+]
+
+# ── Mascot ────────────────────────────────────────────────────────────────────
 _MASCOT = [
     (False, "      │ │ │ │      "),
     (False, "      │ │ │ │      "),
@@ -316,7 +325,7 @@ def run() -> int:
         except (EOFError, KeyboardInterrupt):
             _inactivity_stop.set()
             console.print()
-            console.rule("[dim]Auf Wiedersehen[/dim]", style=_AMBER_DIM)
+            console.rule("[dim]goodbye[/dim]", style=_AMBER_DIM)
             _on_exit(console, history, _session_stats, _session_username)
             console.print()
             return 0
@@ -335,7 +344,7 @@ def run() -> int:
 
             if cmd in ("/exit", "/quit"):
                 _inactivity_stop.set()
-                console.rule("[dim]Auf Wiedersehen[/dim]", style=_AMBER_DIM)
+                console.rule("[dim]goodbye[/dim]", style=_AMBER_DIM)
                 _on_exit(console, history, _session_stats, _session_username)
                 console.print()
                 return 0
@@ -1325,12 +1334,13 @@ def _banner(console: "Console", profile, fc_model: str | None = None,
         style = f"bold {_AMBER_HI}" if bright else _AMBER_DIM
         mascot_t.append(line + "\n", style=style)
 
-    pname = personality.get("display_name", "Nex") if personality else "Nex"
+    pname = personality.get("display_name", "nex") if personality else "nex"
     tone  = personality.get("tone", "") if personality else ""
 
     info = Text()
     info.append("\n")
     info.append("N E X O R Y X\n", style=f"bold {_AMBER_HI}")
+    info.append(f"{random.choice(_MOTTOS)}\n", style=f"italic {_AMBER_DIM}")
     info.append("─" * 16 + "\n", style=_AMBER_DIM)
     info.append(f"◆  {pname}", style=f"bold {_AMBER}")
     if tone:
@@ -1341,7 +1351,7 @@ def _banner(console: "Console", profile, fc_model: str | None = None,
         info.append(f"  ·  {fc_model}", style=_AMBER_DIM)
     info.append("\n\n")
 
-    # Befehlsübersicht — zwei Spalten
+    # Commands — two columns
     cmds_left  = ["/help", "/code", "/plan", "/research", "/train"]
     cmds_right = ["/settings", "/memory", "/tools", "/stats", "/exit"]
     for l, r in zip(cmds_left, cmds_right):
@@ -1813,7 +1823,7 @@ def _run_plain(router, mem, cfg, profile) -> int:
         try:
             user = input("  ▸  ").strip()
         except (EOFError, KeyboardInterrupt):
-            print("\nAuf Wiedersehen.")
+            print("\ngoodbye.")
             return 0
         if not user:
             continue

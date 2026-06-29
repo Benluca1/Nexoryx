@@ -1,10 +1,18 @@
-/* Nexoryx Desktop-GUI — Frontend-Logik */
+/* nex — AI harness frontend */
 
 'use strict';
 
-// ── Zustand ───────────────────────────────────────────────────────────────────
-let _activeBubble = null;   // <div> das gerade Tokens empfängt
-let _step = 0;              // aktueller Onboarding-Schritt
+const _MOTTOS = [
+  'trained in the dark. ready in the light.',
+  'no cloud required. no trace left behind.',
+  'local. private. learning.',
+  'open weights. your data. your model.',
+  'why pay for intelligence you can grow?',
+];
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let _activeBubble = null;
+let _step = 0;
 
 // ── Python → JS Bridge (wird von evaluate_js() aus Python aufgerufen) ─────────
 window._nex = {
@@ -25,6 +33,7 @@ window._nex = {
     }
     _activeBubble = null;
     setSending(false);
+    flashLearnIndicator();
   },
 
   onStreamError(msg) {
@@ -54,14 +63,15 @@ const api = new Proxy({}, {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
-  setSplash('Starte Nexoryx…');
+  const motto = _MOTTOS[Math.floor(Math.random() * _MOTTOS.length)];
+  setSplash(motto);
   await waitBridge();
 
-  setSplash('Verbinde mit KI-Dienst…');
+  setSplash('connecting…');
   const daemon = await api.check_daemon();
 
   if (!daemon.running) {
-    setSplash('⚠️ Dienst konnte nicht gestartet werden. Bitte Nexoryx neu starten.');
+    setSplash('⚠️ Could not start the service. Please restart nex.');
     document.querySelector('.dots').style.display = 'none';
     return;
   }
@@ -155,6 +165,15 @@ function setOffline() {
   document.getElementById('st-dot').className = 'st-dot offline';
 }
 
+let _learnTimer = null;
+function flashLearnIndicator() {
+  const el = document.getElementById('st-learn');
+  if (!el) return;
+  clearTimeout(_learnTimer);
+  el.classList.remove('hidden');
+  _learnTimer = setTimeout(() => el.classList.add('hidden'), 2800);
+}
+
 // ── Chat ──────────────────────────────────────────────────────────────────────
 function sendMessage(text) {
   if (!text || _activeBubble) return;
@@ -214,18 +233,18 @@ async function loadSettingsView() {
   // System-Info
   const info = document.getElementById('sys-info');
   const lines = [];
-  if (cfg.profile)           lines.push(`Profil:         <span>${cfg.profile}</span>`);
-  if (cfg.house_base)        lines.push(`Basismodell:    <span>${cfg.house_base}</span>`);
+  if (cfg.profile)           lines.push(`Profile:        <span>${cfg.profile}</span>`);
+  if (cfg.house_base)        lines.push(`Base model:     <span>${cfg.house_base}</span>`);
   if (training && !training.error) {
-    lines.push(`Trainingsdaten: <span>${training.dataset_size} Beispiele</span>`);
+    lines.push(`Training data:  <span>${training.dataset_size} examples</span>`);
     if (training.house_trained) {
-      lines.push(`Eigenes Modell: <span>v${training.house_version} (trainiert)</span>`);
+      lines.push(`House model:    <span>v${training.house_version} (trained)</span>`);
     }
   }
   const keysActive = Object.entries(cfg.keys || {})
     .filter(([,v]) => v).map(([k]) => k).join(', ') || '—';
-  lines.push(`API-Keys:       <span>${keysActive}</span>`);
-  info.innerHTML = lines.join('<br>') || 'Keine Informationen verfügbar';
+  lines.push(`API keys:       <span>${keysActive}</span>`);
+  info.innerHTML = lines.join('<br>') || 'No information available';
 }
 
 async function saveSettings() {
