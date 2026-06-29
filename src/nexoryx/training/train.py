@@ -214,6 +214,127 @@ def _cleanup_old_versions(keep_from: int) -> None:
         _ollama_rm(f"nexoryx-house-v{old}")
 
 
+# ── Kontinuierlicher Verbesserungs-Loop ──────────────────────────────────────
+
+def autotrain(
+    model_tag: str | None = None,
+    base_tag: str | None = None,
+    max_rounds: int = 50,
+    synth_per_round: int = 10,
+    topics: list[str] | None = None,
+    log_fn=print,
+) -> dict:
+    """Trainiert kontinuierlich, solange jede neue Version besser ist.
+
+    base_tag:  Welches Ollama-Modell als FROM-Basis für nexoryx-house-vN dient.
+               Standard: HOUSE_BASE (qwen2.5:0.5b)
+    model_tag: Welches Modell die synthetischen Trainingsdaten generiert.
+               Standard: base_tag
+    topics:    Benutzerdefinierte Trainingsthemen (z. B. ["Python", "Security"]).
+               None = eingebauter Standard-Pool.
+
+    Pro Runde:
+      1. Synthetische Beispiele via model_tag generieren (kein Mensch nötig)
+      2. nexoryx-house-vN via Ollama Modelfile erstellen (FROM base_tag)
+      3. Eval-Gate: Kandidat vs. Incumbent auf Holdout-Token-F1
+      4. Besser (oder kein Holdout) → Promotion → nächste Runde
+      5. Schlechter → Stop, bestes Modell bleibt aktiv
+
+    Hält an wenn:
+      - Eval-Gate schlägt fehl (Modell schlechter geworden)
+      - max_rounds erreicht
+      - Ollama nicht verfügbar oder Training fehlgeschlagen
+    """
+    from .synthetic import generate_batch
+
+    if not _ollama_available():
+        return {
+            "action": "failed",
+            "error": "Ollama nicht verfügbar. Starte mit: ollama serve",
+        }
+
+    cfg = cfg_mod.load()
+    if base_tag is None:
+        base_tag = HOUSE_BASE
+    if model_tag is None:
+        model_tag = base_tag
+
+    log_fn(
+        f"[AutoTrain] Loop startet — Basis: {base_tag}, "
+        f"Synthesizer: {model_tag}, "
+        f"max. {max_rounds} Runden, {synth_per_round} Beispiele/Runde."
+    )
+
+    total_synth = 0
+    last_action = "none"
+    final_round = 0
+
+    for round_n in range(1, max_rounds + 1):
+        final_round = round_n
+        log_fn(f"\n[AutoTrain] ── Runde {round_n}/{max_rounds} ──────────────────")
+        topic_hint = f" zu [{', '.join(topics[:3])}{'…' if len(topics) > 3 else ''}]" if topics else ""
+        log_fn(f"  Generiere {synth_per_round} Beispiele via {model_tag}{topic_hint}…")
+        saved = generate_batch(model_tag, synth_per_round, custom_topics=topics, log_fn=log_fn)
+        total_synth += saved
+        log_fn(f"  {saved} gespeichert (gesamt synthetisch: {total_synth})")
+
+        log_fn(f"  Trainiere nexoryx-house (FROM {base_tag})…")
+        result = train(base_tag=base_tag)
+        action = result.get("action", "?")
+        last_action = action
+
+        if action == "trained":
+            ev = result.get("eval", {})
+            v = result.get("house_version", "?")
+            cand = ev.get("candidate_score")
+            inc = ev.get("incumbent_score")
+            if cand is not None:
+                log_fn(f"  ✓ nexoryx-house-v{v} aktiv  Score: {cand:.4f} vs {inc:.4f}")
+            else:
+                log_fn(f"  ✓ nexoryx-house-v{v} aktiv  (kein Eval — Holdout zu klein)")
+
+        elif action == "rejected":
+            ev = result.get("eval", {})
+            cand = ev.get("candidate_score")
+            inc = ev.get("incumbent_score")
+            log_fn(
+                f"\n[AutoTrain] ✗ Kein Fortschritt mehr "
+                f"(Kandidat {cand} < Baseline {inc}) — Loop beendet."
+            )
+            break
+
+        elif action == "skipped":
+            reason = result.get("reason", "?")
+            log_fn(f"  → Übersprungen: {reason}")
+            log_fn("  Erzeuge mehr Daten und versuche nächste Runde…")
+
+        elif action == "failed":
+            err = result.get("error", "?")
+            log_fn(f"\n[AutoTrain] ✗ Training fehlgeschlagen: {err}")
+            break
+
+        elif action == "script_generated":
+            log_fn("[AutoTrain] Ollama nicht verfügbar — LoRA-Skript erzeugt, Loop beendet.")
+            break
+
+    cfg_final = cfg_mod.load()
+    best = cfg_final.house_base or HOUSE_BASE
+    v = cfg_final.house_version
+
+    log_fn(
+        f"\n[AutoTrain] Fertig nach {final_round} Runde(n). "
+        f"Bestes Modell: {best} (v{v})"
+    )
+    return {
+        "action": "done",
+        "rounds": final_round,
+        "last_action": last_action,
+        "total_synth": total_synth,
+        "final_version": v,
+        "final_model": best,
+    }
+
+
 # ── LoRA-Skript-Weg (Fallback) ────────────────────────────────────────────────
 
 def _write_lora_script(repo_root: Path, hf_base: str, data_path: str) -> Path:
@@ -263,11 +384,11 @@ print("Fertig: ./house-adapter")
 
 # ── Haupt-Einstieg ────────────────────────────────────────────────────────────
 
-def train(repo_root: Path | None = None) -> dict:
+def train(repo_root: Path | None = None, base_tag: str | None = None) -> dict:
     """Training auslösen. Gibt einen Bericht zurück."""
     cfg = cfg_mod.load()
     st = dataset.stats()
-    base_tag = HOUSE_BASE   # immer qwen2.5:0.5b
+    base_tag = base_tag or HOUSE_BASE
     report: dict = {"action": "", "base": base_tag, "stats": st}
 
     if st["total"] < MIN_EXAMPLES:

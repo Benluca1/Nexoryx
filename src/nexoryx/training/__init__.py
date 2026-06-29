@@ -8,11 +8,11 @@ Modell.
 
 from .dataset import record_interaction, stats, export_chatml, DATASET_PATH
 from .house import recommended_base, HOUSE_BASES
-from .train import train, train_report
+from .train import train, train_report, autotrain
 from .eval import gate, score_model, holdout_examples
 
 __all__ = [
     "record_interaction", "stats", "export_chatml", "DATASET_PATH",
-    "recommended_base", "HOUSE_BASES", "train", "train_report",
+    "recommended_base", "HOUSE_BASES", "train", "train_report", "autotrain",
     "gate", "score_model", "holdout_examples",
 ]

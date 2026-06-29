@@ -152,13 +152,33 @@ async function loadStatus() {
     if (s.error) { setOffline(); return; }
 
     document.getElementById('st-profile').textContent = s.profile || '—';
-    const first = (s.models || [])[0];
-    document.getElementById('st-model').textContent = first ? first.model : 'lokal';
     const dot = document.getElementById('st-dot');
     dot.className = 'st-dot online';
   } catch {
     setOffline();
   }
+  await loadModels();
+}
+
+async function loadModels() {
+  try {
+    const models = await api.get_models();
+    const sel = document.getElementById('st-model');
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">auto</option>';
+    for (const m of (models || [])) {
+      const opt = document.createElement('option');
+      opt.value = m.tag;
+      opt.textContent = m.label;
+      if (m.active) opt.selected = true;
+      sel.appendChild(opt);
+    }
+    if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
+  } catch { /* Ollama nicht erreichbar — dropdown bleibt leer */ }
+}
+
+async function onModelChange(tag) {
+  await api.set_model(tag);
 }
 
 function setOffline() {

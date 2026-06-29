@@ -373,10 +373,15 @@ def run() -> int:
                 _cli.cmd_doctor(argparse.Namespace())
 
             elif cmd == "/models":
-                import argparse
-                from .. import cli as _cli
                 console.print()
-                _cli.cmd_models(argparse.Namespace(models_action="list"))
+                chosen = _cmd_model_picker(console, fc_model, is_admin=session_admin[0])
+                if chosen and chosen != fc_model:
+                    fc_model = chosen
+                    console.print(
+                        f"\n  [{_GREEN}]✓ Modell gewechselt →[/{_GREEN}]  "
+                        f"[bold]{fc_model}[/bold]\n"
+                    )
+                    _banner(console, profile, fc_model, current_personality)
 
             elif cmd == "/usage":
                 import argparse
@@ -700,6 +705,205 @@ def _cmd_train(console: "Console") -> None:
         console.print(f"  [bold {_RED}]✗[/bold {_RED}]  Fehler: {result.get('error')}")
 
 
+def _arrow_select(
+    items: list[tuple[str, str]],
+    console: "Console",
+    title: str = "Auswahl",
+) -> str | None:
+    """Interaktive Pfeil-Auswahl im Terminal.
+
+    items: Liste von (value, Anzeigetext).
+    Gibt value zurück oder None bei Abbruch (q / Esc / Ctrl+C).
+    """
+    if not items:
+        return None
+
+    n = len(items)
+    selected = 0
+
+    # Nicht-interaktives Terminal: ersten Eintrag nehmen
+    if not sys.stdin.isatty():
+        return items[0][0]
+
+    try:
+        import tty
+        import termios
+    except ImportError:
+        # Windows-Fallback: nummerierte Auswahl
+        console.print()
+        for i, (_, label) in enumerate(items, 1):
+            console.print(f"  [{_AMBER_DIM}]{i}.[/{_AMBER_DIM}] {label}")
+        try:
+            ch = console.input(f"\n  [{_AMBER}]▸[/{_AMBER}]  Nummer eingeben: ").strip()
+            idx = int(ch) - 1
+            return items[idx][0] if 0 <= idx < n else None
+        except (ValueError, IndexError, EOFError, KeyboardInterrupt):
+            return None
+
+    # ANSI-Konstanten
+    HIDE = "\033[?25l"
+    SHOW = "\033[?25h"
+    # Amber #F5C242 → bold; Amber-dim #7A5510
+    SEL  = "\033[38;2;245;194;66m\033[1m"
+    DIM  = "\033[38;2;90;60;10m"
+    RST  = "\033[0m"
+
+    def _lines() -> list[str]:
+        out = []
+        for i, (_, label) in enumerate(items):
+            if i == selected:
+                out.append(f"  {SEL}►  {label}{RST}")
+            else:
+                out.append(f"  {DIM}   {label}{RST}")
+        out.append("")
+        out.append(f"  \033[2m↑ ↓  navigieren   Enter  bestätigen   q  abbrechen\033[0m")
+        return out  # n + 2 Einträge
+
+    # Header mit Rich drucken (außerhalb raw-mode)
+    console.print()
+    console.print(Panel(
+        Text(f"Modell für Synthese wählen", style=f"bold {_AMBER}"),
+        title=f"[bold {_AMBER_HI}]◆ {title}[/bold {_AMBER_HI}]",
+        border_style=_AMBER_DIM, box=box.HEAVY_HEAD, padding=(0, 2),
+    ))
+
+    # Initial render (außerhalb raw-mode damit Puffer stimmt)
+    sys.stdout.write(HIDE)
+    lines = _lines()
+    for line in lines:
+        sys.stdout.write(line + "\n")
+    sys.stdout.flush()
+
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    result: str | None = None
+    _ctrl_c = False
+
+    try:
+        tty.setraw(fd)
+        while True:
+            ch = sys.stdin.read(1)
+
+            if ch == "\x1b":
+                nxt = sys.stdin.read(1)
+                if nxt == "[":
+                    arrow = sys.stdin.read(1)
+                    if arrow == "A":        # ↑
+                        selected = (selected - 1) % n
+                    elif arrow == "B":      # ↓
+                        selected = (selected + 1) % n
+                # bare Esc oder unbekannte Sequenz → ignorieren
+            elif ch in ("\r", "\n"):        # Enter
+                result = items[selected][0]
+                break
+            elif ch in ("q", "Q"):
+                break
+            elif ch == "\x03":             # Ctrl+C
+                _ctrl_c = True
+                break
+
+            # Neu zeichnen: Cursor hoch + Zeilen überschreiben
+            sys.stdout.write(f"\033[{len(lines)}A\r")
+            lines = _lines()
+            for line in lines:
+                sys.stdout.write("\033[2K" + line + "\n")
+            sys.stdout.flush()
+
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        sys.stdout.write(SHOW)
+        sys.stdout.flush()
+
+    if _ctrl_c:
+        raise KeyboardInterrupt
+
+    return result
+
+
+def _cmd_model_picker(
+    console: "Console",
+    current_model: str | None,
+    is_admin: bool = False,
+) -> str | None:
+    """Interaktiver Pfeil-Picker zum Wechseln des aktiven Modells für die Sitzung.
+
+    nex_admin ist nur für Admin-Sitzungen sichtbar und wählbar.
+    Gibt den gewählten Tag zurück, oder None bei Abbruch.
+    """
+    from ..router.providers.ollama import OllamaProvider
+
+    with console.status(
+        f"[{_AMBER_DIM}]Lade Ollama-Modelle …[/{_AMBER_DIM}]",
+        spinner="dots2", spinner_style=_AMBER_HI,
+    ):
+        raw_tags = OllamaProvider()._list()
+
+    if not raw_tags:
+        console.print(Panel(
+            Text("Keine Ollama-Modelle gefunden.\nOllama starten und mindestens ein Modell laden.",
+                 style=f"bold {_YELLOW}"),
+            border_style=_YELLOW, box=box.ROUNDED, padding=(0, 2)))
+        return None
+
+    def _is_nex(tag: str) -> bool:
+        t = tag.lower()
+        return (
+            t.startswith("nexoryx") or t.startswith("nex_") or t.startswith("nex-")
+            or t.startswith("qwen2.5") or t.startswith("qwen")
+            or "tinynex" in t or "tinyllama" in t
+        )
+
+    def _is_admin_only(tag: str) -> bool:
+        return tag.lower().startswith("nex_admin")
+
+    nex_tags = [
+        t for t in raw_tags
+        if _is_nex(t) and (is_admin or not _is_admin_only(t))
+    ] or [t for t in raw_tags if not _is_admin_only(t)] or raw_tags
+
+    def _rank(tag: str) -> tuple:
+        t = tag.lower()
+        if t.startswith("nex_admin"):      return (0, t)
+        if t.startswith("nexoryx-house"):  return (1, t)
+        if t.startswith("nexoryx") or t.startswith("nex_") or t.startswith("nex-"):
+            return (2, t)
+        if t.startswith("qwen"):           return (3, t)
+        return (4, t)
+
+    sorted_tags = sorted(nex_tags, key=_rank)
+
+    def _label(tag: str) -> str:
+        t = tag.lower()
+        extras: list[str] = []
+        if tag == current_model:
+            extras.append("aktiv")
+        if t.startswith("nex_admin"):
+            extras.append("Security · Coding · Admin")
+        elif t.startswith("nexoryx-house"):
+            extras.append("trainiertes Hausmodell")
+        elif t.startswith("nexoryx") or t.startswith("nex_") or t.startswith("nex-"):
+            extras.append("Nex-Modell")
+        if "qwen2.5:0.5b" in t:
+            extras.append("0.5B · CPU-ok")
+        elif "qwen2.5:3b" in t:
+            extras.append("3B")
+        elif "qwen" in t and "0.5b" not in t and "3b" not in t:
+            extras.append("Qwen-Familie")
+        if "tinyllama" in t or "tinynex" in t:
+            extras.append("TinyLlama 1.1B · schnell")
+        hint = "  [dim]" + " · ".join(extras) + "[/dim]" if extras else ""
+        return f"[bold]{tag}[/bold]{hint}"
+
+    picker_items = [(tag, _label(tag)) for tag in sorted_tags]
+    chosen = _arrow_select(picker_items, console, title="◆ Modell wechseln")
+
+    if chosen is None:
+        console.print(f"\n  [dim]Abgebrochen.[/dim]")
+        return None
+
+    return chosen
+
+
 def _autotrain_running() -> bool:
     """Prüft ob ein /autotrain-Prozess gerade läuft (PID-Datei)."""
     from pathlib import Path
@@ -720,10 +924,10 @@ def _autotrain_running() -> bool:
 
 
 def _cmd_autotrain(console: "Console", is_admin: bool) -> None:
-    """Startet das Hausmodell-Training als eigenständigen Prozess.
+    """Zwei-Schritt-Modellauswahl (Pfeiltasten) + Start des AutoTrain-Loops.
 
-    Der Prozess läuft weiter auch wenn die TUI geschlossen wird.
-    Fertigmeldung kommt per Telegram. Log: ~/.nexoryx/autotrain.log
+    Schritt 1: Welches Nex-Modell wird trainiert? (Basis für nexoryx-house-vN)
+    Schritt 2: Welches Modell generiert die Trainingsdaten? (Synthesizer)
     """
     import subprocess
     import sys
@@ -735,7 +939,6 @@ def _cmd_autotrain(console: "Console", is_admin: bool) -> None:
             border_style=_RED, box=box.ROUNDED, padding=(0, 2)))
         return
 
-    # Bereits laufenden Prozess erkennen
     if _autotrain_running():
         log_path = Path.home() / ".nexoryx" / "autotrain.log"
         console.print(Panel(
@@ -743,43 +946,188 @@ def _cmd_autotrain(console: "Console", is_admin: bool) -> None:
             border_style=_YELLOW, box=box.ROUNDED, padding=(0, 2)))
         return
 
-    from ..training.train import train_report
-    report = train_report()
-    total = report["dataset"]["total"]
-    teacher = report["dataset"].get("teacher", 0)
-    MIN = 50
+    # ── Ollama-Modelle holen ──────────────────────────────────────────────────
+    from ..router.providers.ollama import OllamaProvider
+    from ..platform import config as cfg_mod
+    from ..training.house import HOUSE_BASE
 
-    tbl = Table(box=box.SIMPLE, show_header=False, padding=(0, 2))
-    tbl.add_column(style=_AMBER_DIM, width=22)
-    tbl.add_column(style="white")
-    tbl.add_row("Datensatz gesamt", str(total))
-    tbl.add_row("  davon Cloud (Teacher)", str(teacher))
-    tbl.add_row("Basismodell", report.get("house_base", "?"))
-    tbl.add_row("Bereits trainiert", "✓" if report.get("house_trained") else "—")
-    tbl.add_row("Version", str(report.get("house_version", 0)))
-    deps = report.get("deps_missing", [])
-    tbl.add_row("Fehlende Deps", ", ".join(deps) if deps else "keine ✓")
+    cfg = cfg_mod.load()
+    current_base = cfg.house_base or HOUSE_BASE
 
-    console.print()
-    console.print(Panel(tbl,
-        title=f"[bold {_AMBER_HI}]◆ Auto-Train[/bold {_AMBER_HI}]",
-        border_style=_AMBER_DIM, box=box.HEAVY_HEAD, padding=(0, 1)))
+    with console.status(
+        f"[{_AMBER_DIM}]Lade Ollama-Modelle …[/{_AMBER_DIM}]",
+        spinner="dots2", spinner_style=_AMBER_HI,
+    ):
+        raw_tags = OllamaProvider()._list()
 
-    if total < MIN:
-        console.print(
-            f"  [{_YELLOW}]●[/{_YELLOW}]  Noch [bold]{MIN - total}[/bold] Beispiele nötig "
-            f"(aktuell {total}/{MIN}).\n"
-            f"  [dim]Nutze Nexoryx weiter — jede Antwort sammelt Trainingsdaten.[/dim]"
-        )
+    if not raw_tags:
+        console.print(Panel(
+            Text("Keine Ollama-Modelle gefunden.\nOllama starten und mindestens ein Modell laden.",
+                 style=f"bold {_YELLOW}"),
+            border_style=_YELLOW, box=box.ROUNDED, padding=(0, 2)))
         return
 
+    # ── Hilfsfunktionen ───────────────────────────────────────────────────────
+    def _is_nex_base(tag: str) -> bool:
+        """Nur Modelle die als nexoryx-house-Basis in Frage kommen."""
+        t = tag.lower()
+        return (
+            t.startswith("nexoryx-house")
+            or t.startswith("nexoryx")
+            or t.startswith("nex_")
+            or t.startswith("nex-")
+            or t.startswith("qwen2.5")
+            or t.startswith("qwen")
+        )
+
+    def _rank_base(tag: str) -> tuple:
+        t = tag.lower()
+        if t.startswith("nexoryx-house"):                                return (0, t)
+        if t.startswith("nexoryx") or t.startswith("nex_") or t.startswith("nex-"):
+            return (1, t)
+        if t.startswith("qwen2.5") or t.startswith("qwen"):             return (2, t)
+        return (3, t)
+
+    def _extras_base(tag: str) -> list[str]:
+        t = tag.lower()
+        out: list[str] = []
+        if tag == current_base:             out.append("aktuell aktiv")
+        if t.startswith("nexoryx-house"):   out.append("trainiertes Hausmodell")
+        elif t.startswith("nexoryx") or t.startswith("nex_") or t.startswith("nex-"):
+            out.append("Nex-Modell")
+        if "qwen2.5:0.5b" in t:    out.append("0.5B · CPU-ok")
+        elif "qwen2.5:3b" in t:    out.append("3B")
+        elif "qwen2.5:14b" in t:   out.append("14B")
+        elif t.startswith("qwen"): out.append("Qwen")
+        return out
+
+    def _extras_synth(tag: str) -> list[str]:
+        t = tag.lower()
+        out: list[str] = []
+        if tag == chosen_base:              out.append("gewählte Basis")
+        if t.startswith("nexoryx-house"):   out.append("trainiertes Hausmodell")
+        elif t.startswith("nexoryx") or t.startswith("nex_") or t.startswith("nex-"):
+            out.append("Nex-Modell")
+        if "qwen2.5:0.5b" in t:     out.append("0.5B · schnell")
+        elif "qwen2.5:3b" in t:     out.append("3B")
+        elif "qwen2.5:14b" in t:    out.append("14B · empfohlen")
+        elif "tinyllama" in t:       out.append("TinyLlama 1.1B")
+        elif t.startswith("qwen"):   out.append("Qwen")
+        return out
+
+    def _label(tag: str, extras_fn) -> str:
+        extras = extras_fn(tag)
+        hint = "  [dim]" + " · ".join(extras) + "[/dim]" if extras else ""
+        return f"[bold]{tag}[/bold]{hint}"
+
+    # ── Picker 1: Welches Nex-Modell wird trainiert? ──────────────────────────
+    base_tags = [t for t in raw_tags if _is_nex_base(t)] or raw_tags
+    base_items = [
+        (t, _label(t, _extras_base))
+        for t in sorted(base_tags, key=_rank_base)
+    ]
+
+    chosen_base = _arrow_select(
+        base_items, console,
+        title="◆ AutoTrain — Welches Nex-Modell wird trainiert?",
+    )
+    if chosen_base is None:
+        console.print(f"\n  [dim]Abgebrochen.[/dim]")
+        return
+
+    # ── Picker 2: Welches Modell trainiert es? ────────────────────────────────
+    console.print()
+    console.print(Panel(
+        Text(
+            f"Trainiert wird:  [bold]{chosen_base}[/bold]\n"
+            f"Jetzt: Welches Modell generiert die synthetischen Trainingsdaten?",
+            style=_AMBER_DIM,
+        ),
+        border_style=_AMBER_DIM, box=box.ROUNDED, padding=(0, 2),
+    ))
+
+    # chosen_base als erstes anbieten (naheliegendste Wahl)
+    synth_sorted = sorted(
+        raw_tags,
+        key=lambda t: (0 if t == chosen_base else 1, t.lower()),
+    )
+    synth_items = [(t, _label(t, _extras_synth)) for t in synth_sorted]
+
+    chosen_synth = _arrow_select(
+        synth_items, console,
+        title="◆ AutoTrain — Welches Modell trainiert das Nex-Modell?",
+    )
+    if chosen_synth is None:
+        console.print(f"\n  [dim]Abgebrochen.[/dim]")
+        return
+
+    # ── Themen-Eingabe ────────────────────────────────────────────────────────
+    console.print()
+    console.print(Panel(
+        f"[{_AMBER_DIM}]Leer lassen = Standard-Pool (50 Themen aus 5 Kategorien)\n"
+        f"Eigene Themen: kommagetrennt, z. B.:\n"
+        f"  [{_AMBER_HI}]Python, Linux, Security, Git, Docker[/{_AMBER_HI}][/{_AMBER_DIM}]",
+        title=f"[bold {_AMBER_HI}]◆ AutoTrain — Trainingsthemen[/bold {_AMBER_HI}]",
+        border_style=_AMBER_DIM, box=box.HEAVY_HEAD, padding=(0, 1)))
+    try:
+        raw_topics = console.input(
+            f"\n  [{_AMBER}]▸[/{_AMBER}]  Themen (kommagetrennt, Enter für Standard):  "
+        ).strip()
+    except (EOFError, KeyboardInterrupt):
+        console.print("\n  [dim]Abgebrochen.[/dim]")
+        return
+    topics: list[str] | None = (
+        [t.strip() for t in raw_topics.split(",") if t.strip()] or None
+    )
+
+    # ── Bestätigungs-Panel ────────────────────────────────────────────────────
+    next_v = cfg.house_version + 1
+    console.print()
+    tbl = Table(box=box.SIMPLE, show_header=False, padding=(0, 2))
+    tbl.add_column(style=_AMBER_DIM, width=26)
+    tbl.add_column(style="white")
+    tbl.add_row("Nex-Modell (Basis)", chosen_base)
+    tbl.add_row("  → wird zu", f"nexoryx-house-v{next_v}")
+    tbl.add_row("Synthese-Modell", chosen_synth)
+    tbl.add_row("Trainingsthemen", ", ".join(topics) if topics else "(Standard-Pool)")
+    tbl.add_row("Max. Runden", "50")
+    tbl.add_row("Beispiele/Runde", "10")
+    tbl.add_row("Stopp-Bedingung", "Eval-Gate schlägt fehl")
+    tbl.add_row("", "")
+    tbl.add_row("Log", str(Path.home() / ".nexoryx" / "autotrain.log"))
+    tbl.add_row("Benachrichtigung", "Telegram (bei Abschluss)")
+    console.print(Panel(tbl,
+        title=f"[bold {_AMBER_HI}]◆ AutoTrain — Konfiguration[/bold {_AMBER_HI}]",
+        border_style=_AMBER_DIM, box=box.HEAVY_HEAD, padding=(0, 1)))
+
+    try:
+        confirm = console.input(
+            f"\n  [{_AMBER}]▸[/{_AMBER}]  "
+            f"[[bold]Enter[/bold] = starten]  [[dim]q[/dim] = abbrechen]:  "
+        ).strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        console.print("\n  [dim]Abgebrochen.[/dim]")
+        return
+
+    if confirm in ("q", "n", "nein", "no"):
+        console.print("  [dim]Abgebrochen.[/dim]")
+        return
+
+    # ── Hintergrundprozess starten ────────────────────────────────────────────
     log_path = Path.home() / ".nexoryx" / "autotrain.log"
     try:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_fh = open(log_path, "w", encoding="utf-8")
+        cmd = [sys.executable, "-m", "nexoryx", "train", "autotrain",
+               "--base",  chosen_base,
+               "--model", chosen_synth,
+               "--rounds", "50",
+               "--synth",  "10"]
+        if topics:
+            cmd += ["--topics", ",".join(topics)]
         proc = subprocess.Popen(
-            [sys.executable, "-m", "nexoryx", "train", "background"],
-            start_new_session=True,   # vom Terminal-Prozess abkoppeln
+            cmd,
+            start_new_session=True,
             stdout=log_fh,
             stderr=subprocess.STDOUT,
         )
@@ -791,16 +1139,18 @@ def _cmd_autotrain(console: "Console", is_admin: bool) -> None:
         return
 
     tbl2 = Table(box=box.SIMPLE, show_header=False, padding=(0, 2))
-    tbl2.add_column(style=_AMBER_DIM, width=22)
+    tbl2.add_column(style=_AMBER_DIM, width=26)
     tbl2.add_column(style="white")
     tbl2.add_row("PID", str(pid))
-    tbl2.add_row("Datensatz", f"{total} Beispiele")
+    tbl2.add_row("Nex-Basis", chosen_base)
+    tbl2.add_row("Synthesizer", chosen_synth)
+    tbl2.add_row("Themen", ", ".join(topics) if topics else "(Standard-Pool)")
     tbl2.add_row("Log", str(log_path))
     tbl2.add_row("", "")
-    tbl2.add_row("Du kannst die TUI", "jetzt schließen")
+    tbl2.add_row("TUI schließen?", "ja — Training läuft weiter")
     tbl2.add_row("Fertigmeldung via", "Telegram")
     console.print(Panel(tbl2,
-        title=f"[bold {_GREEN}]▶  Training gestartet[/bold {_GREEN}]",
+        title=f"[bold {_GREEN}]▶  AutoTrain gestartet[/bold {_GREEN}]",
         border_style=_GREEN, box=box.HEAVY_HEAD, padding=(0, 1)))
 
 

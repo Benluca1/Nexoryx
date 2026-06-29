@@ -57,6 +57,7 @@ class NexoryxAPI:
         self._hw = None
         self._profile = None
         self.window = None  # wird nach create_window() gesetzt
+        self._selected_model: str | None = None
 
     # -- Daemon ----------------------------------------------------------------
 
@@ -96,13 +97,24 @@ class NexoryxAPI:
             router = Router(self._hw, self._profile)
             req = ChatRequest(prompt=prompt)
 
-            chain = router.rank(req)
-            model_name = chain[0][0].name if chain else "unknown"
-            provider_name = chain[0][0].provider if chain else "unknown"
-
-            for chunk in router.stream(req):
-                payload = json.dumps(chunk)
-                self.window.evaluate_js(f"window._nex.appendToken({payload})")
+            forced = self._selected_model
+            if forced:
+                from ...router.providers.ollama import OllamaProvider
+                provider = OllamaProvider()
+                model_name = forced
+                provider_name = "ollama"
+                parts: list[str] = []
+                for chunk in provider.stream(req, forced):
+                    parts.append(chunk)
+                    payload = json.dumps(chunk)
+                    self.window.evaluate_js(f"window._nex.appendToken({payload})")
+            else:
+                chain = router.rank(req)
+                model_name = chain[0][0].name if chain else "unknown"
+                provider_name = chain[0][0].provider if chain else "unknown"
+                for chunk in router.stream(req):
+                    payload = json.dumps(chunk)
+                    self.window.evaluate_js(f"window._nex.appendToken({payload})")
 
             meta = json.dumps({"model": model_name, "provider": provider_name})
             self.window.evaluate_js(f"window._nex.onStreamEnd({meta})")
@@ -116,6 +128,59 @@ class NexoryxAPI:
             from ...platform import detect, choose_profile
             self._hw = detect()
             self._profile = choose_profile(self._hw)
+
+    # -- Modell-Auswahl --------------------------------------------------------
+
+    def _is_admin(self) -> bool:
+        from ...platform import config as cfg_mod
+        return cfg_mod.load().is_admin()
+
+    def get_models(self) -> list[dict]:
+        """Gibt verfügbare Ollama-Modelle zurück. nex_admin nur für Admins."""
+        try:
+            from ...router.providers.ollama import OllamaProvider
+            tags = OllamaProvider()._list()
+        except Exception:
+            tags = []
+
+        is_admin = self._is_admin()
+
+        def _is_admin_only(tag: str) -> bool:
+            return tag.lower().startswith("nex_admin")
+
+        def _label(tag: str) -> str:
+            t = tag.lower()
+            if t.startswith("nex_admin"):
+                return f"{tag}  [Security · Coding · Admin]"
+            if t.startswith("nexoryx-house"):
+                return f"{tag}  [Hausmodell]"
+            if t.startswith("nexoryx") or t.startswith("nex_"):
+                return f"{tag}  [Nex-Modell]"
+            if "qwen2.5:0.5b" in t:
+                return f"{tag}  [0.5B · CPU-ok]"
+            return tag
+
+        def _rank(tag: str) -> int:
+            t = tag.lower()
+            if t.startswith("nex_admin"):          return 0
+            if t.startswith("nexoryx-house"):      return 1
+            if t.startswith("nexoryx") or t.startswith("nex_"): return 2
+            if t.startswith("qwen"):               return 3
+            return 4
+
+        visible = [t for t in tags if is_admin or not _is_admin_only(t)]
+        sorted_tags = sorted(visible, key=_rank)
+        return [
+            {"tag": tag, "label": _label(tag), "active": tag == self._selected_model}
+            for tag in sorted_tags
+        ]
+
+    def set_model(self, tag: str) -> dict:
+        """Setzt das aktive Modell. nex_admin erfordert Admin-Rolle."""
+        if tag and tag.lower().startswith("nex_admin") and not self._is_admin():
+            return {"ok": False, "error": "nex_admin erfordert Admin-Rolle"}
+        self._selected_model = tag if tag else None
+        return {"ok": True, "model": self._selected_model}
 
     # -- Konfiguration ---------------------------------------------------------
 

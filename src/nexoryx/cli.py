@@ -199,6 +199,90 @@ def cmd_train(args: argparse.Namespace) -> int:
 
 
 
+def cmd_autotrain(args: argparse.Namespace) -> int:
+    """nexoryx train autotrain — kontinuierlicher Loop ohne Konversationen.
+
+    Generiert synthetische Beispiele via lokalem Ollama-Modell, trainiert
+    nexoryx-house-vN und wiederholt solange jede neue Version besser ist.
+    """
+    import os
+    from pathlib import Path
+    from .training.train import autotrain
+
+    base   = getattr(args, "base",   None) or None
+    model  = getattr(args, "model",  None) or None
+    rounds = getattr(args, "rounds", 50)
+    synth  = getattr(args, "synth",  10)
+    raw_topics = getattr(args, "topics", None) or ""
+    topics = [t.strip() for t in raw_topics.split(",") if t.strip()] or None
+
+    # PID-Datei schreiben, damit TUI _autotrain_running() erkennt
+    pid_path = Path.home() / ".nexoryx" / "autotrain.pid"
+    pid_path.parent.mkdir(parents=True, exist_ok=True)
+    pid_path.write_text(str(os.getpid()), encoding="utf-8")
+
+    try:
+        rep = autotrain(
+            base_tag=base,
+            model_tag=model,
+            max_rounds=rounds,
+            synth_per_round=synth,
+            topics=topics,
+            log_fn=print,
+        )
+    finally:
+        try:
+            pid_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    if rep["action"] == "failed":
+        print(_c(f"Fehler: {rep['error']}", _RED))
+        return 1
+
+    _header("AutoTrain Ergebnis")
+    _kv("Runden gelaufen", str(rep["rounds"]))
+    _kv("Synthetische Beispiele", str(rep["total_synth"]))
+    _kv("Letzter Status", rep["last_action"])
+    _kv("Bestes Modell", rep["final_model"])
+    _kv("Version", f"v{rep['final_version']}" if rep["final_version"] else "—")
+    print()
+    return 0
+
+
+def cmd_admin_train(_args: argparse.Namespace) -> int:
+    from .training.admin import train_admin, admin_status
+    try:
+        st = admin_status()
+    except PermissionError as e:
+        print(_c(f"⛔ {e}", _RED))
+        return 1
+    _header("nex_admin — Security/Coding-Modell  [Admin]")
+    _kv("Ollama verfügbar", "ja" if st["ollama_available"] else "nein")
+    _kv("Modelfile vorhanden", "ja" if st["modelfile_exists"] else "nein")
+    _kv("Modell bereits installiert", "ja" if st["model_exists"] else "nein")
+    if not st["ollama_available"]:
+        print(_c("\nOllama nicht gefunden. Starte mit: ollama serve", _RED))
+        return 1
+    if not st["modelfile_exists"]:
+        print(_c(f"\nModelfile fehlt: {st['modelfile_path']}", _RED))
+        return 1
+    print()
+    try:
+        rep = train_admin(log_fn=print)
+    except PermissionError as e:
+        print(_c(f"⛔ {e}", _RED))
+        return 1
+    print()
+    if rep["action"] == "trained":
+        print(_c(f"✓ {rep['model_tag']} trainiert ({rep['examples']} Beispiele).", _GREEN))
+        print(_c(f"  Nutzen: nexoryx ask --model {rep['model_tag']} \"Frage\"", _DIM))
+    else:
+        print(_c(f"Fehler: {rep.get('error','?')}", _RED))
+        return 1
+    return 0
+
+
 def cmd_train_background(_args: argparse.Namespace) -> int:
     """Hintergrund-Trainings-Loop: trainieren → pushen → warten → wiederholen.
 
@@ -790,6 +874,37 @@ def build_parser() -> argparse.ArgumentParser:
     te.add_argument("--teacher-only", action="store_true", help="nur Cloud-Beispiele")
     bg = tsub.add_parser("background", help="Hintergrund-Worker (von TUI gestartet)")
     bg.set_defaults(func=cmd_train_background)
+    ata = tsub.add_parser(
+        "autotrain",
+        help="Kontinuierlicher Loop: trainiert solange das Modell besser wird",
+    )
+    ata.add_argument(
+        "--base", default=None,
+        help="Nex-Basismodell das trainiert wird (FROM in Modelfile, z. B. qwen2.5:0.5b)",
+    )
+    ata.add_argument(
+        "--model", default=None,
+        help="Ollama-Modell das die Trainingsdaten generiert (Standard: --base)",
+    )
+    ata.add_argument(
+        "--rounds", type=int, default=50,
+        help="Maximale Runden (Standard: 50)",
+    )
+    ata.add_argument(
+        "--synth", type=int, default=10,
+        help="Synthetische Beispiele pro Runde (Standard: 10)",
+    )
+    ata.add_argument(
+        "--topics", default="",
+        help="Trainingsthemen, kommagetrennt (z. B. 'Python,Security,Linux'). "
+             "Leer = eingebauter Standard-Pool.",
+    )
+    ata.set_defaults(func=cmd_autotrain)
+    adm = tsub.add_parser(
+        "admin",
+        help="nex_admin trainieren: Coding + Security/Hacking-Modell (Ollama Modelfile)",
+    )
+    adm.set_defaults(func=cmd_admin_train)
     train.set_defaults(func=cmd_train)
 
     sub.add_parser("panic", help="Kill-Switch: alle Tasks/Agenten stoppen").set_defaults(func=cmd_panic)

@@ -101,7 +101,9 @@
       <span class="chat-title">nex</span>
       <div class="status-bar">
         <span id="st-profile" class="st-chip" title="Hardware-Profil">—</span>
-        <span id="st-model"   class="st-chip" title="Aktives Modell">—</span>
+        <select id="st-model" class="st-chip st-model-select" title="Modell wechseln" onchange="onModelChange(this.value)">
+          <option value="">— Modell —</option>
+        </select>
         <span id="st-learn" class="st-chip learn-chip hidden" title="Interaktion wird als Trainingsdatum gespeichert">◉ lernt</span>
         <span id="st-dot" class="st-dot" title="Verbindung">●</span>
       </div>
