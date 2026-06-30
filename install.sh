@@ -206,6 +206,9 @@ if [[ "$PM" == "apt" ]] && [[ "$OS" != "Darwin" ]]; then
   ok "WebKit2GTK System-Pakete installiert"
 fi
 
+pip_run "Desktop-GUI (pywebview + Qt)" \
+  "pywebview>=5.0" "PyQt6>=6.4" "qtpy>=2.4" || true
+
 pip_run "Dev-Tools" "pytest>=8" || true
 ok "Python-Pakete abgeschlossen"
 

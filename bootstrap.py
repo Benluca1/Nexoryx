@@ -71,7 +71,7 @@ def _ensure_python_packages() -> None:
     )
     if not _can_import("nexoryx"):
         print("  Installiere Nexoryx + Abhängigkeiten …")
-        spec = f"{_REPO_ROOT}[runtime,cloud,telegram]"
+        spec = f"{_REPO_ROOT}[runtime,cloud,telegram,gui]"
         if _pip("-e", spec):
             _ok("Nexoryx installiert")
         else:
@@ -788,7 +788,6 @@ def main() -> int:
     )
 
     do_telegram  = chosen_tools is not None and 0 in chosen_tools
-    do_gui       = chosen_tools is not None and 1 in chosen_tools
     do_autostart = chosen_tools is not None and 2 in chosen_tools
 
     if do_telegram:
@@ -813,10 +812,7 @@ def main() -> int:
     elif chosen_tools is not None:
         _warn("Telegram skipped — set up later:  nex admin telegram")
 
-    if do_gui:
-        _install_gui_deps()
-    elif chosen_tools is not None:
-        _warn("Desktop GUI skipped — install later:  pip install pywebview PyQt6")
+    _install_gui_deps()
 
     if do_autostart:
         _install_systemd_service()
@@ -826,8 +822,8 @@ def main() -> int:
     if chosen_tools is None:
         _warn("Tools skipped — configure later:  nex admin")
 
-    # Desktop-Icon immer erstellen (nex-gui muss installiert sein)
-    _create_desktop_entry(with_desktop_link=(args.source != "server"))
+    # Desktop-Icon + Verknüpfung immer erstellen
+    _create_desktop_entry(with_desktop_link=True)
 
     # ══════════════════════════════════════════════════════════════════════════
     #  STEP 3 of 3 — Allowed Documents
@@ -890,6 +886,23 @@ def main() -> int:
     if rec_tag:
         cfg.house_base = rec_tag
     cfg_mod.save(cfg)
+
+    # ── Admin-Modell (nex_admin) bauen ────────────────────────────────────────
+    if role == "admin" and shutil.which("ollama"):
+        print(f"\n  {_B}Admin-Modell (nex_admin){_RST}")
+        try:
+            from nexoryx.training.admin import train_admin, MODEL_TAG as _ADMIN_TAG
+            _admin_base = "qwen2.5-coder:1.5b"
+            print(f"  Lade Basis-Modell {_C}{_admin_base}{_RST} …")
+            subprocess.run(["ollama", "pull", _admin_base], capture_output=False, check=False)
+            result = train_admin(log_fn=print)
+            if result.get("action") == "trained":
+                _ok(f"Modell '{result['model_tag']}' erstellt ({result['examples']} Trainingsbeispiele)")
+                _ok(f"Verfügbar als LLM-Backend: ollama run {result['model_tag']}")
+            else:
+                _warn(f"nex_admin: {result.get('error', 'unbekannter Fehler')}")
+        except Exception as _exc:
+            _warn(f"Admin-Modell übersprungen: {_exc}")
 
     # ── PATH ──────────────────────────────────────────────────────────────────
     venv_bin   = Path(sys.executable).parent
